@@ -784,12 +784,17 @@ import sys, json
 
 domain  = sys.argv[1]
 target  = sys.argv[2]
-result  = None
 
 BROWSERS = [
     'firefox', 'librewolf', 'chrome', 'arc', 'brave',
     'edge', 'chromium', 'opera', 'vivaldi', 'safari',
 ]
+
+# Collect candidates from every browser that has the target cookie.
+# Pick the one with the latest expiry on the target cookie so we always
+# use the freshest session (handles the case where the user is logged in
+# to multiple browsers simultaneously).
+candidates = []  # list of (expires, cookie_str)
 
 try:
     import browser_cookie3
@@ -799,14 +804,22 @@ try:
             continue
         try:
             jar = fn(domain_name=domain)
-            c = {x.name: x.value for x in jar}
-            if target in c:
-                result = '; '.join(f'{k}={v}' for k, v in c.items())
-                break
+            cookies = {x.name: x for x in jar}
+            if target not in cookies:
+                continue
+            expires = cookies[target].expires or 0
+            cookie_str = '; '.join(f'{k}={c.value}' for k, c in cookies.items())
+            candidates.append((expires, cookie_str))
         except Exception:
             pass
 except Exception:
     pass
+
+# Best = latest expiry; tie-break by longest cookie string (richest jar)
+result = None
+if candidates:
+    candidates.sort(key=lambda x: (x[0], len(x[1])), reverse=True)
+    result = candidates[0][1]
 
 print(json.dumps(result))
 """
