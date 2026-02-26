@@ -15,17 +15,25 @@ status bar icon (`🟢 4%`, `🟡 83%`, `🔴 100%`).
 
 ## Architecture
 
-Single file: `claude_bar.py` (~850 lines). No build step. No framework.
+Single file: `claude_bar.py` (~900 lines). No build step. No framework.
 
 ```
 claude_bar.py
-├── Config        load_config / save_config  (~/.claude_bar_config.json)
-├── API layer     fetch_raw → _get / _org_id_from_api
-├── Parser        parse_usage → UsageData(session, weekly_all, weekly_sonnet)
-├── Display       _bar / _status_icon / _row_lines
-├── Cookie mgmt   _auto_detect_cookies → browser-cookie3 (Firefox first, then Chromium)
-└── App           ClaudeBar(rumps.App) — timer, menu rebuild, callbacks
+├── Config         load_config / save_config  (~/.claude_bar_config.json)
+├── Claude API     fetch_raw → _get / _org_id_from_api
+├── Provider APIs  fetch_openai / fetch_minimax / fetch_glm → ProviderData
+│                  PROVIDER_REGISTRY: cfg_key → (name, fetch_fn)
+├── Parser         parse_usage → UsageData(session, weekly_all, weekly_sonnet)
+├── Display        _bar / _status_icon / _row_lines / _provider_lines
+├── Cookie mgmt    _auto_detect_cookies → browser-cookie3 (Firefox first, then Chromium)
+└── App            ClaudeBar(rumps.App) — timer, menu rebuild, callbacks
 ```
+
+## Adding a new provider
+
+1. Write `fetch_myprovider(api_key: str) -> ProviderData` — return `ProviderData` with `spent`/`limit` or `balance`
+2. Add one entry to `PROVIDER_REGISTRY`: `"myprovider_key": ("MyProvider", fetch_myprovider)`
+3. That's it — the menu item, key dialog, and display are all automatic.
 
 ## Key decisions to preserve
 

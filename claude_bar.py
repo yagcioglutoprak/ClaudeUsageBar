@@ -22,7 +22,7 @@ import tempfile
 import threading
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 try:
     import browser_cookie3
@@ -82,6 +82,24 @@ class UsageData:
     weekly_sonnet: LimitRow | None = None
     overages_enabled: bool | None = None
     raw: dict = field(default_factory=dict)
+
+
+@dataclass
+class ProviderData:
+    """Usage/billing data for a third-party API provider."""
+    name: str
+    spent: float | None = None    # current period spend
+    limit: float | None = None    # hard/soft limit
+    balance: float | None = None  # prepaid balance (for credit-based providers)
+    currency: str = "USD"
+    period: str = "this month"
+    error: str | None = None
+
+    @property
+    def pct(self) -> int | None:
+        if self.spent is not None and self.limit and self.limit > 0:
+            return min(100, round(self.spent / self.limit * 100))
+        return None
 
 
 # ── claude.ai API ─────────────────────────────────────────────────────────────
@@ -183,6 +201,76 @@ def fetch_raw(cookie_str: str) -> dict:
     return {"usage": usage, "org_id": org_id}
 
 
+# ── third-party provider APIs ────────────────────────────────────────────────
+
+def _api_get(url: str, headers: dict) -> dict:
+    r = requests.get(url, headers=headers, timeout=10, impersonate="chrome131")
+    r.raise_for_status()
+    return r.json()
+
+
+def fetch_openai(api_key: str) -> ProviderData:
+    h = {"Authorization": f"Bearer {api_key}"}
+    try:
+        sub = _api_get(
+            "https://api.openai.com/v1/dashboard/billing/subscription", h
+        )
+        hard_limit = float(
+            sub.get("hard_limit_usd") or sub.get("system_hard_limit_usd") or 0
+        )
+        now = datetime.now()
+        start = now.replace(day=1).strftime("%Y-%m-%d")
+        end = (now + timedelta(days=1)).strftime("%Y-%m-%d")
+        usage = _api_get(
+            f"https://api.openai.com/v1/dashboard/billing/usage"
+            f"?start_date={start}&end_date={end}", h
+        )
+        spent = float(usage.get("total_usage", 0)) / 100  # cents → dollars
+        return ProviderData(
+            "OpenAI", spent=spent,
+            limit=hard_limit or None, currency="USD", period="this month",
+        )
+    except Exception as e:
+        log.debug("fetch_openai failed: %s", e)
+        return ProviderData("OpenAI", error=str(e)[:80])
+
+
+def fetch_minimax(api_key: str) -> ProviderData:
+    h = {"Authorization": f"Bearer {api_key}"}
+    try:
+        data = _api_get("https://api.minimax.chat/v1/account_information", h)
+        balance = float(
+            data.get("available_balance") or data.get("balance") or 0
+        )
+        return ProviderData("MiniMax", balance=balance, currency="CNY")
+    except Exception as e:
+        log.debug("fetch_minimax failed: %s", e)
+        return ProviderData("MiniMax", error=str(e)[:80])
+
+
+def fetch_glm(api_key: str) -> ProviderData:
+    h = {"Authorization": f"Bearer {api_key}"}
+    try:
+        data = _api_get(
+            "https://open.bigmodel.cn/api/paas/v4/account/balance", h
+        )
+        balance = float(
+            data.get("total_balance") or data.get("balance") or 0
+        )
+        return ProviderData("GLM (Zhipu)", balance=balance, currency="CNY")
+    except Exception as e:
+        log.debug("fetch_glm failed: %s", e)
+        return ProviderData("GLM (Zhipu)", error=str(e)[:80])
+
+
+# Registry: config_key → (display_name, fetch_fn)
+PROVIDER_REGISTRY: dict[str, tuple[str, callable]] = {
+    "openai_key":  ("OpenAI",      fetch_openai),
+    "minimax_key": ("MiniMax",     fetch_minimax),
+    "glm_key":     ("GLM (Zhipu)", fetch_glm),
+}
+
+
 # ── time helpers ──────────────────────────────────────────────────────────────
 
 _DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -274,6 +362,23 @@ def _row_lines(row: LimitRow) -> list[str]:
         f"  {bar}  {row.pct}%",
         f"  {row.reset_str}" if row.reset_str else "",
     ]
+
+
+def _provider_lines(pd: ProviderData) -> list[str]:
+    sym = "¥" if pd.currency == "CNY" else "$"
+    if pd.error:
+        return [f"  ⚠️  {pd.error[:60]}"]
+    lines = []
+    if pd.pct is not None:
+        icon = _status_icon(pd.pct)
+        bar = _bar(pd.pct)
+        lines.append(f"  {icon} {sym}{pd.spent:.2f} / {sym}{pd.limit:.2f} {pd.period}")
+        lines.append(f"  {bar}  {pd.pct}%")
+    elif pd.balance is not None:
+        lines.append(f"  💰 {sym}{pd.balance:.2f} remaining")
+    elif pd.spent is not None:
+        lines.append(f"  💰 {sym}{pd.spent:.2f} {pd.period}")
+    return lines
 
 
 def _mi(title: str) -> rumps.MenuItem:
@@ -511,6 +616,7 @@ class ClaudeBar(rumps.App):
         self.config = load_config()
         self._last_raw: dict = {}
         self._last_data: UsageData | None = None
+        self._provider_data: list[ProviderData] = []
         self._warned_pcts: set[str] = set()   # track which rows we've notified
         self._auth_fail_count = 0
         self._fetching = False
@@ -568,6 +674,15 @@ class ClaudeBar(rumps.App):
                 items.append(_mi(f"  Updated at {t}"))
                 items.append(None)
 
+        # ── Third-party providers ─────────────────────────────────────────
+        for pd in self._provider_data:
+            items.append(_mi(pd.name.upper()))
+            items.append(None)
+            for line in _provider_lines(pd):
+                if line:
+                    items.append(_mi(line))
+            items.append(None)
+
         # ── Actions ──────────────────────────────────────────────────────
         items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))
         items.append(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._open_usage_page))
@@ -582,6 +697,17 @@ class ClaudeBar(rumps.App):
             )
             interval_menu.add(item)
         items.append(interval_menu)
+        items.append(None)
+
+        # API providers submenu
+        providers_menu = rumps.MenuItem("API Providers")
+        for cfg_key, (name, _) in PROVIDER_REGISTRY.items():
+            is_set = bool(self.config.get(cfg_key))
+            label = f"{'✓' if is_set else '+'} {name} API Key…"
+            providers_menu.add(rumps.MenuItem(
+                label, callback=self._make_provider_key_cb(cfg_key, name)
+            ))
+        items.append(providers_menu)
 
         items.append(None)
         items.append(rumps.MenuItem("Auto-detect from Browser", callback=self._auto_detect_menu))
@@ -636,6 +762,7 @@ class ClaudeBar(rumps.App):
             self._last_updated = datetime.now()
             log.debug("parsed UsageData: %s", data)
             self._check_warnings(data)
+            self._fetch_providers()
             self._apply(data)
         except CurlHTTPError as e:
             code = getattr(e, "code", 0) or 0
@@ -717,6 +844,15 @@ class ClaudeBar(rumps.App):
             self.title = "◆"
         self._rebuild_menu(data)
 
+    def _fetch_providers(self):
+        """Fetch all configured third-party API providers (sync, called from fetch thread)."""
+        results = []
+        for cfg_key, (name, fetch_fn) in PROVIDER_REGISTRY.items():
+            api_key = self.config.get(cfg_key)
+            if api_key:
+                results.append(fetch_fn(api_key))
+        self._provider_data = results
+
     # ── callbacks ─────────────────────────────────────────────────────────────
 
     def _do_refresh(self, _sender):
@@ -724,6 +860,24 @@ class ClaudeBar(rumps.App):
 
     def _open_usage_page(self, _sender):
         subprocess.Popen(["open", "https://claude.ai/settings/usage"])
+
+    def _make_provider_key_cb(self, cfg_key: str, name: str):
+        def _cb(_sender):
+            current = self.config.get(cfg_key, "")
+            key = _ask_text(
+                title=f"Claude Usage Bar — {name}",
+                prompt=f"Paste your {name} API key.\nLeave blank to remove.",
+                default=current,
+            )
+            if key is None:
+                return  # cancelled
+            if key.strip():
+                self.config[cfg_key] = key.strip()
+            else:
+                self.config.pop(cfg_key, None)
+            save_config(self.config)
+            self._schedule_fetch()
+        return _cb
 
     def _make_interval_cb(self, secs: int, label: str):
         def _cb(_sender):

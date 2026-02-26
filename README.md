@@ -57,11 +57,12 @@ WEEKLY LIMITS
 ## Features
 
 - **Zero-setup auth** — reads cookies directly from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
+- **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside Claude usage
 - **Auto-refresh on session expiry** — silently grabs fresh cookies when your session expires
 - **macOS notifications** — alerts at 80% and 95% usage
 - **Configurable refresh** — 1 / 5 / 15 min
 - **Runs at login** — via LaunchAgent, toggle from the menu
-- **Tiny footprint** — ~600 lines of Python, no Electron, no background services beyond the app itself
+- **Tiny footprint** — ~900 lines of Python, no Electron, no background services beyond the app itself
 
 ---
 
