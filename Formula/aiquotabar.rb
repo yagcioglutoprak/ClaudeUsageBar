@@ -1,6 +1,10 @@
 class Aiquotabar < Formula
   desc "macOS menu bar app showing live Claude.ai and ChatGPT usage limits"
   homepage "https://github.com/yagcioglutoprak/AIQuotaBar"
+  url "https://github.com/yagcioglutoprak/AIQuotaBar/archive/refs/tags/v1.1.0.tar.gz"
+  sha256 "9c875f01e4891e4483640abcf1447e172dcf66ddfc49f46df91187ea19c4f5ff"
+  version "1.1.0"
+
   head "https://github.com/yagcioglutoprak/AIQuotaBar.git", branch: "main"
 
   license "MIT"
