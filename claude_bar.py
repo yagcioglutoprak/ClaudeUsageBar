@@ -662,11 +662,20 @@ class ClaudeBar(rumps.App):
                 self._warned_pcts.discard(crit_key)
 
     def _apply(self, data: UsageData):
-        candidates = [r for r in [data.session, data.weekly_all, data.weekly_sonnet] if r]
-        if candidates:
-            top = max(candidates, key=lambda r: r.pct)
-            icon = _status_icon(top.pct)
-            self.title = f"{icon} {top.pct}%"
+        # Session (5-hour) determines whether you can use Claude right now.
+        # Use it as the primary indicator; fall back to weekly only if no session data.
+        primary = data.session or data.weekly_all or data.weekly_sonnet
+        if primary:
+            icon = _status_icon(primary.pct)
+            # If session is fine but a weekly limit is maxed out, add a warning dot
+            weekly_maxed = any(
+                r and r.pct >= CRIT_THRESHOLD
+                for r in [data.weekly_all, data.weekly_sonnet]
+            )
+            if weekly_maxed and primary is data.session and primary.pct < CRIT_THRESHOLD:
+                self.title = f"{icon} {primary.pct}% ·"
+            else:
+                self.title = f"{icon} {primary.pct}%"
         else:
             self.title = "◆"
         self._rebuild_menu(data)
