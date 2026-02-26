@@ -8,7 +8,7 @@ Sections shown (matching claude.ai/settings/usage):
   3. Extra usage       → toggle status
 
 Setup:
-  pip install rumps requests
+  pip install -r requirements.txt
   python3 claude_bar.py
 """
 
@@ -35,8 +35,16 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 CONFIG_FILE = os.path.expanduser("~/.claude_bar_config.json")
-REFRESH_INTERVAL = 300  # 5 minutes
 
+REFRESH_INTERVALS = {
+    "1 min":  60,
+    "5 min":  300,
+    "15 min": 900,
+}
+DEFAULT_REFRESH = 300
+
+WARN_THRESHOLD = 80   # notify when any limit crosses this %
+CRIT_THRESHOLD = 95   # title turns red emoji above this %
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -94,7 +102,6 @@ def parse_cookie_string(raw: str) -> dict:
     """Parse 'key=val; key2=val2' or just a bare sessionKey value."""
     raw = raw.strip()
     if "=" not in raw:
-        # bare value — assume it's the sessionKey
         return {"sessionKey": raw}
     cookies = {}
     for part in raw.split(";"):
@@ -108,7 +115,7 @@ def parse_cookie_string(raw: str) -> dict:
 def _get(url: str, cookies: dict) -> dict | list:
     r = requests.get(
         url, cookies=cookies, headers=HEADERS, timeout=15,
-        impersonate="chrome131",  # match Chrome TLS fingerprint (JA3/JA4)
+        impersonate="chrome131",
     )
     log.debug("GET %s  status=%s  body=%s", url, r.status_code, r.text[:800])
     r.raise_for_status()
@@ -116,12 +123,10 @@ def _get(url: str, cookies: dict) -> dict | list:
 
 
 def _org_id_from_cookies(cookies: dict) -> str | None:
-    """claude.ai stores the active org UUID in the lastActiveOrg cookie."""
     return cookies.get("lastActiveOrg") or cookies.get("routingHint")
 
 
 def _org_id_from_api(cookies: dict) -> str | None:
-    """Fallback: try known account/bootstrap endpoints."""
     for path in (
         "/api/organizations",
         "/api/bootstrap",
@@ -130,11 +135,9 @@ def _org_id_from_api(cookies: dict) -> str | None:
     ):
         try:
             data = _get(f"https://claude.ai{path}", cookies)
-            # /api/organizations returns a list
             if isinstance(data, list) and data:
                 return data[0].get("id") or data[0].get("uuid")
             if isinstance(data, dict):
-                # try common nested shapes
                 for candidate in (
                     data.get("organization_id"),
                     data.get("org_id"),
@@ -150,7 +153,6 @@ def _org_id_from_api(cookies: dict) -> str | None:
 
 
 def fetch_raw(cookie_str: str) -> dict:
-    """Return raw combined payload: {rate_limits, org_id}."""
     cookies = parse_cookie_string(cookie_str)
     log.debug("using cookies keys: %s", list(cookies.keys()))
 
@@ -198,7 +200,6 @@ def _fmt_reset(val) -> str:
             if h > 0:
                 return f"resets in {h}h {m}m"
             return f"resets in {m}m"
-        # Far future → show weekday + time
         day = _DAYS[dt.weekday()]
         return f"resets {day} {dt.strftime('%H:%M')}"
     except Exception:
@@ -209,7 +210,6 @@ def _fmt_reset(val) -> str:
 # ── parser ────────────────────────────────────────────────────────────────────
 
 def _row(data: dict, key: str, label: str) -> LimitRow | None:
-    """Extract a LimitRow from a known key in the usage response."""
     bucket = data.get(key)
     if not bucket or not isinstance(bucket, dict):
         return None
@@ -246,10 +246,19 @@ def _bar(pct: int, width: int = 14) -> str:
     return "█" * filled + "░" * (width - filled)
 
 
+def _status_icon(pct: int) -> str:
+    if pct >= CRIT_THRESHOLD:
+        return "🔴"
+    if pct >= WARN_THRESHOLD:
+        return "🟡"
+    return "🟢"
+
+
 def _row_lines(row: LimitRow) -> list[str]:
     bar = _bar(row.pct)
+    icon = _status_icon(row.pct)
     return [
-        f"  {row.label}",
+        f"  {icon} {row.label}",
         f"  {bar}  {row.pct}%",
         f"  {row.reset_str}" if row.reset_str else "",
     ]
@@ -262,10 +271,64 @@ def _mi(title: str) -> rumps.MenuItem:
     return item
 
 
+# ── login item helpers ────────────────────────────────────────────────────────
+
+def _script_path() -> str:
+    return os.path.abspath(__file__)
+
+
+def _is_login_item() -> bool:
+    try:
+        result = subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to get the name of every login item'],
+            capture_output=True, text=True, timeout=10,
+        )
+        return "claude_bar" in result.stdout.lower()
+    except Exception:
+        return False
+
+
+def _add_login_item():
+    path = _script_path()
+    script = (
+        f'tell application "System Events" to make login item at end '
+        f'with properties {{path:"/usr/bin/python3", name:"ClaudeBar", hidden:false}}'
+    )
+    # Use launchctl + a plist for reliability
+    plist = os.path.expanduser("~/Library/LaunchAgents/com.claudebar.plist")
+    content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claudebar</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>{path}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+</dict>
+</plist>"""
+    with open(plist, "w") as f:
+        f.write(content)
+    subprocess.run(["launchctl", "load", plist], capture_output=True)
+
+
+def _remove_login_item():
+    plist = os.path.expanduser("~/Library/LaunchAgents/com.claudebar.plist")
+    if os.path.exists(plist):
+        subprocess.run(["launchctl", "unload", plist], capture_output=True)
+        os.remove(plist)
+
+
 # ── native macOS dialogs via osascript ───────────────────────────────────────
 
 def _ask_text(title: str, prompt: str, default: str = "") -> str | None:
-    """Show a native macOS text-input dialog. Returns text or None if cancelled."""
     script = (
         f'display dialog "{prompt}" '
         f'default answer "{default}" '
@@ -278,7 +341,7 @@ def _ask_text(title: str, prompt: str, default: str = "") -> str | None:
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode != 0:
-            return None  # cancelled
+            return None
         out = result.stdout.strip()
         if "text returned:" in out:
             return out.split("text returned:")[-1].strip()
@@ -287,8 +350,17 @@ def _ask_text(title: str, prompt: str, default: str = "") -> str | None:
     return None
 
 
+def _clipboard_text() -> str:
+    try:
+        result = subprocess.run(
+            ["pbpaste"], capture_output=True, text=True, timeout=5
+        )
+        return result.stdout.strip()
+    except Exception:
+        return ""
+
+
 def _show_text(title: str, text: str):
-    """Write text to a temp file and open it in TextEdit."""
     try:
         tmp = tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False,
@@ -308,9 +380,16 @@ class ClaudeBar(rumps.App):
         super().__init__("◆", quit_button=None)
         self.config = load_config()
         self._last_raw: dict = {}
-        self._rebuild_menu(None)
+        self._last_data: UsageData | None = None
+        self._warned_pcts: set[str] = set()   # track which rows we've notified
+        self._auth_fail_count = 0
+        self._fetching = False
+        self._last_updated: datetime | None = None
 
-        self._timer = rumps.Timer(self._on_timer, REFRESH_INTERVAL)
+        self._refresh_interval = self.config.get("refresh_interval", DEFAULT_REFRESH)
+
+        self._rebuild_menu(None)
+        self._timer = rumps.Timer(self._on_timer, self._refresh_interval)
         self._timer.start()
 
         if self.config.get("cookie_str"):
@@ -319,7 +398,6 @@ class ClaudeBar(rumps.App):
     # ── menu ─────────────────────────────────────────────────────────────────
 
     def _rebuild_menu(self, data: UsageData | None):
-        # Always create fresh MenuItem objects — rumps forbids reuse across menus
         items: list = []
 
         if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
@@ -344,23 +422,49 @@ class ClaudeBar(rumps.App):
                             items.append(_mi(line))
                     items.append(None)
 
-            # ── Section 3: Extra usage ──────────────────────────────────
+            # ── Section 3: Extra usage ──────────��───────────────────────
             items.append(_mi("EXTRA USAGE"))
             items.append(None)
             if data.overages_enabled is not None:
-                status = "On" if data.overages_enabled else "Off"
+                status = "✅ On" if data.overages_enabled else "⛔ Off"
                 items.append(_mi(f"  Extra usage: {status}"))
             else:
                 items.append(_mi("  (not available)"))
             items.append(None)
 
-        items += [
-            rumps.MenuItem("Refresh Now", callback=self._do_refresh),
-            rumps.MenuItem("Set Session Cookie…", callback=self._set_cookie),
-            rumps.MenuItem("Show Raw API Data…", callback=self._show_raw),
-            None,
-            rumps.MenuItem("Quit", callback=rumps.quit_application),
-        ]
+            # ── Last updated ────────────────────────────────────────────
+            if self._last_updated:
+                t = self._last_updated.strftime("%H:%M:%S")
+                items.append(_mi(f"  Updated at {t}"))
+                items.append(None)
+
+        # ── Actions ──────────────────────────────────────────────────────
+        items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))
+        items.append(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._open_usage_page))
+        items.append(None)
+
+        # Refresh interval submenu
+        interval_menu = rumps.MenuItem("Refresh Interval")
+        for label, secs in REFRESH_INTERVALS.items():
+            item = rumps.MenuItem(
+                ("✓ " if secs == self._refresh_interval else "  ") + label,
+                callback=self._make_interval_cb(secs, label),
+            )
+            interval_menu.add(item)
+        items.append(interval_menu)
+
+        items.append(None)
+        items.append(rumps.MenuItem("Set Session Cookie…", callback=self._set_cookie))
+        items.append(rumps.MenuItem("Paste Cookie from Clipboard", callback=self._paste_cookie))
+        items.append(rumps.MenuItem("Show Raw API Data…", callback=self._show_raw))
+        items.append(None)
+
+        # Launch at login toggle
+        login_label = "✓ Launch at Login" if _is_login_item() else "  Launch at Login"
+        items.append(rumps.MenuItem(login_label, callback=self._toggle_login_item))
+
+        items.append(None)
+        items.append(rumps.MenuItem("Quit", callback=rumps.quit_application))
 
         self.menu.clear()
         self.menu = items
@@ -371,40 +475,90 @@ class ClaudeBar(rumps.App):
         self._schedule_fetch()
 
     def _schedule_fetch(self):
+        if self._fetching:
+            return
         threading.Thread(target=self._fetch_and_update, daemon=True).start()
 
     def _fetch_and_update(self):
+        self._fetching = True
         sk = self.config.get("cookie_str")
         if not sk:
+            self._fetching = False
             return
+
+        # Show loading state
+        current = self.title
+        self.title = current.split(" ")[0] + " …"
+
         try:
             raw = fetch_raw(sk)
             self._last_raw = raw
+            self._auth_fail_count = 0
             data = parse_usage(raw)
+            self._last_data = data
+            self._last_updated = datetime.now()
             log.debug("parsed UsageData: %s", data)
+            self._check_warnings(data)
             self._apply(data)
         except CurlHTTPError as e:
             code = getattr(e, "code", 0) or 0
             log.error("HTTP error: %s", e, exc_info=True)
             if code in (401, 403):
+                self._auth_fail_count += 1
                 self.title = "◆ !"
-                rumps.notification(
-                    "Claude Usage Bar",
-                    "Auth failed — refresh your cookies",
-                    "Click the menu bar icon → Set Session Cookie…",
-                )
+                if self._auth_fail_count >= 2:
+                    # Auto-prompt after 2 consecutive auth failures
+                    rumps.notification(
+                        "Claude Usage Bar",
+                        "Session expired — please update your cookie",
+                        "Click: Set Session Cookie…",
+                    )
+                    self._auth_fail_count = 0
             else:
-                self.title = f"◆ err"
+                self.title = "◆ err"
         except Exception:
             log.exception("fetch failed")
             self.title = "◆ ?"
+        finally:
+            self._fetching = False
+
+    def _check_warnings(self, data: UsageData):
+        """Send macOS notification when a limit crosses the warning threshold."""
+        rows = [
+            (data.session, "session"),
+            (data.weekly_all, "weekly_all"),
+            (data.weekly_sonnet, "weekly_sonnet"),
+        ]
+        for row, key in rows:
+            if row is None:
+                continue
+            warn_key = f"{key}_{WARN_THRESHOLD}"
+            crit_key = f"{key}_{CRIT_THRESHOLD}"
+            if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
+                self._warned_pcts.add(crit_key)
+                rumps.notification(
+                    "Claude Usage Bar 🔴",
+                    f"{row.label} is at {row.pct}%!",
+                    row.reset_str or "Limit almost reached",
+                )
+            elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
+                self._warned_pcts.add(warn_key)
+                rumps.notification(
+                    "Claude Usage Bar 🟡",
+                    f"{row.label} is at {row.pct}%",
+                    row.reset_str or "Approaching limit",
+                )
+            elif row.pct < WARN_THRESHOLD:
+                # Reset warnings when usage drops (after a reset)
+                self._warned_pcts.discard(warn_key)
+                self._warned_pcts.discard(crit_key)
 
     def _apply(self, data: UsageData):
-        # Title badge: highest-pct row
         candidates = [r for r in [data.session, data.weekly_all, data.weekly_sonnet] if r]
         if candidates:
             top = max(candidates, key=lambda r: r.pct)
-            self.title = f"◆ {top.pct}%"
+            icon = _status_icon(top.pct)
+            self.title = f"{icon} {top.pct}%"
         else:
             self.title = "◆"
         self._rebuild_menu(data)
@@ -413,6 +567,20 @@ class ClaudeBar(rumps.App):
 
     def _do_refresh(self, _sender):
         self._schedule_fetch()
+
+    def _open_usage_page(self, _sender):
+        subprocess.Popen(["open", "https://claude.ai/settings/usage"])
+
+    def _make_interval_cb(self, secs: int, label: str):
+        def _cb(_sender):
+            self._refresh_interval = secs
+            self.config["refresh_interval"] = secs
+            save_config(self.config)
+            self._timer.stop()
+            self._timer = rumps.Timer(self._on_timer, secs)
+            self._timer.start()
+            self._rebuild_menu(self._last_data)
+        return _cb
 
     def _set_cookie(self, _sender):
         key = _ask_text(
@@ -430,11 +598,42 @@ class ClaudeBar(rumps.App):
         if key:
             self.config["cookie_str"] = key.strip()
             save_config(self.config)
+            self._warned_pcts.clear()
+            self._auth_fail_count = 0
             self._schedule_fetch()
+
+    def _paste_cookie(self, _sender):
+        text = _clipboard_text()
+        if not text or ("sessionKey" not in text and "=" not in text):
+            rumps.notification(
+                "Claude Usage Bar",
+                "Nothing useful in clipboard",
+                "Copy your cookie string from Chrome DevTools first.",
+            )
+            return
+        self.config["cookie_str"] = text
+        save_config(self.config)
+        self._warned_pcts.clear()
+        self._auth_fail_count = 0
+        self._schedule_fetch()
+        rumps.notification(
+            "Claude Usage Bar",
+            "Cookie updated from clipboard ✓",
+            "Fetching usage data…",
+        )
 
     def _show_raw(self, _sender):
         text = json.dumps(self._last_raw.get("usage", self._last_raw), indent=2)
         _show_text(title="Claude Usage — Raw API Response", text=text)
+
+    def _toggle_login_item(self, _sender):
+        if _is_login_item():
+            _remove_login_item()
+            rumps.notification("Claude Usage Bar", "Removed from Login Items", "")
+        else:
+            _add_login_item()
+            rumps.notification("Claude Usage Bar", "Added to Login Items ✓", "Will launch automatically on login")
+        self._rebuild_menu(self._last_data)
 
 
 if __name__ == "__main__":

@@ -6,11 +6,17 @@ A lightweight macOS menu bar app that shows your [Claude.ai](https://claude.ai) 
 
 ## Features
 
+- **Live status icon** — 🟢 / 🟡 / 🔴 in the menu bar based on usage level
 - **Current session** usage (5-hour plan limit)
 - **Weekly limits** — All models & Sonnet only
 - **Extra usage** toggle status
-- Auto-refreshes every 5 minutes
-- Native macOS menu bar, no Electron
+- **Smart notifications** — macOS alert when any limit crosses 80% or 95%
+- **Configurable refresh** — 1 min / 5 min / 15 min, no restart needed
+- **Paste cookie from clipboard** — one click, no dialog
+- **Launch at Login** toggle — built right into the menu
+- **Quick link** to claude.ai/settings/usage
+- **Last updated** timestamp shown in menu
+- Native macOS menu bar — no Electron, no browser
 
 ## Requirements
 
