@@ -628,7 +628,7 @@ class ClaudeBar(rumps.App):
                 self.title = "◆"
                 self._fetching = False
                 return
-                raw = fetch_raw(sk)
+            raw = fetch_raw(sk)
             self._last_raw = raw
             self._auth_fail_count = 0
             data = parse_usage(raw)
