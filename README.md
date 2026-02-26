@@ -1,57 +1,95 @@
 # Claude Usage Bar
 
-A lightweight macOS menu bar app that shows your [Claude.ai](https://claude.ai) usage limits in real time — right from your status bar.
+**See your Claude.ai usage limits live in your macOS menu bar.**
 
-![Claude Usage Bar screenshot](screenshot.png)
+No Electron. No browser extension. One command to install.
+
+![Claude Usage Bar demo](assets/demo.gif)
+
+[![macOS](https://img.shields.io/badge/macOS-12%2B-black?logo=apple)](https://www.apple.com/macos/)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/yagcioglutoprak/ClaudeUsageBar?style=social)](https://github.com/yagcioglutoprak/ClaudeUsageBar/stargazers)
+
+---
+
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/ClaudeUsageBar/main/install.sh | bash
+```
+
+That's it. The app launches immediately and auto-detects your Claude session from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
+
+---
+
+## What it shows
+
+| Menu bar | Meaning |
+|---|---|
+| 🟢 12% | Session usage is low — you're good |
+| 🟡 83% | Approaching the 5-hour limit |
+| 🔴 100% | Rate-limited — shows time until reset |
+| 🔴 100% · | Session is fine but weekly limit is maxed |
+
+Open the menu for full detail:
+
+```
+PLAN USAGE LIMITS
+
+  🟢 Current Session
+  ██░░░░░░░░░░░░  12%
+  resets in 3h 41m
+
+WEEKLY LIMITS
+
+  🟡 All Models
+  ████████████░░  83%
+  resets Wed 23:00
+
+  🟢 Sonnet Only
+  ███░░░░░░░░░░░  22%
+  resets Wed 23:00
+```
+
+---
 
 ## Features
 
-- **Live status icon** — 🟢 / 🟡 / 🔴 in the menu bar based on usage level
-- **Current session** usage (5-hour plan limit)
-- **Weekly limits** — All models & Sonnet only
-- **Extra usage** toggle status
-- **Smart notifications** — macOS alert when any limit crosses 80% or 95%
-- **Configurable refresh** — 1 min / 5 min / 15 min, no restart needed
-- **Paste cookie from clipboard** — one click, no dialog
-- **Launch at Login** toggle — built right into the menu
-- **Quick link** to claude.ai/settings/usage
-- **Last updated** timestamp shown in menu
-- Native macOS menu bar — no Electron, no browser
+- **Zero-setup auth** — reads cookies directly from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
+- **Auto-refresh on session expiry** — silently grabs fresh cookies when your session expires
+- **macOS notifications** — alerts at 80% and 95% usage
+- **Configurable refresh** — 1 / 5 / 15 min
+- **Runs at login** — via LaunchAgent, toggle from the menu
+- **Tiny footprint** — ~600 lines of Python, no Electron, no background services beyond the app itself
+
+---
 
 ## Requirements
 
 - macOS 12+
 - Python 3.10+
-- A Claude.ai account (any paid plan)
+- A Claude.ai paid account
+- Chrome, Arc, Brave, Edge, Firefox, or Safari with an active Claude session
 
-## Installation
+---
+
+## Manual install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/ClaudeUsageBar.git
+git clone https://github.com/yagcioglutoprak/ClaudeUsageBar.git
 cd ClaudeUsageBar
-bash setup.sh
+pip install -r requirements.txt
 python3 claude_bar.py
 ```
 
-> **Tip:** To launch at login, add `claude_bar.py` to  
-> **System Settings → General → Login Items**.
+---
 
-## Getting Your Session Cookie
+## How it works
 
-The app needs your Claude.ai session cookie to fetch usage data.
+The app calls the same private usage API that `claude.ai/settings/usage` uses. It authenticates using your browser's existing session cookies (read locally — never transmitted anywhere except to `claude.ai`).
 
-1. Open [claude.ai/settings/usage](https://claude.ai/settings/usage) in Chrome
-2. Press **F12** → open the **Network** tab
-3. Click any request to `claude.ai`
-4. In **Headers**, find the `cookie:` row
-5. Right-click → **Copy value** (a long string with semicolons)
-6. Click **Set Session Cookie…** in the menu bar app and paste it
-
-Your cookie is stored locally in `~/.claude_bar_config.json` and never sent anywhere except to `claude.ai`.
-
-## How It Works
-
-The app calls the private `claude.ai` usage API (the same one used by the settings page) using a Chrome TLS fingerprint via [`curl_cffi`](https://github.com/yifeikong/curl_cffi) to bypass Cloudflare bot protection.
+[`curl_cffi`](https://github.com/yifeikong/curl_cffi) is used to mimic a Chrome TLS fingerprint, which is required to pass Cloudflare's bot protection.
 
 | API field | Displayed as |
 |---|---|
@@ -60,20 +98,26 @@ The app calls the private `claude.ai` usage API (the same one used by the settin
 | `seven_day_sonnet` | Sonnet Only (weekly) |
 | `extra_usage` | Extra Usage toggle |
 
-## Files
+---
 
-| File | Purpose |
-|---|---|
-| `claude_bar.py` | Main application |
-| `setup.sh` | One-time dependency installer |
+## Troubleshooting
 
-## Logs & Debugging
+**App doesn't appear in menu bar**
+```bash
+tail -50 ~/.claude_bar.log
+```
 
-Logs are written to `~/.claude_bar.log`. Raw API data can be inspected via **Show Raw API Data…** in the menu.
+**Cookies not detected**
+Make sure you're logged into [claude.ai](https://claude.ai) in your browser, then click **Auto-detect from Browser** in the menu.
+
+**Session expired / showing ◆ !**
+The app will try to auto-detect fresh cookies from your browser. If that fails, click **Set Session Cookie…**.
+
+---
 
 ## Contributing
 
-Pull requests welcome! Please open an issue first for major changes.
+PRs welcome. Open an issue first for large changes.
 
 ## License
 
@@ -81,4 +125,4 @@ MIT — see [LICENSE](LICENSE).
 
 ## Disclaimer
 
-This project is not affiliated with or endorsed by Anthropic. It uses undocumented internal APIs that may change without notice.
+Not affiliated with or endorsed by Anthropic. Uses undocumented internal APIs that may change without notice.
