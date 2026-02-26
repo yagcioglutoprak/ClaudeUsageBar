@@ -10,6 +10,15 @@ No Electron. No browser extension. One command to install.
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/yagcioglutoprak/ClaudeUsageBar?style=social)](https://github.com/yagcioglutoprak/ClaudeUsageBar/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/yagcioglutoprak/ClaudeUsageBar/total)](https://github.com/yagcioglutoprak/ClaudeUsageBar/releases)
+[![Latest Release](https://img.shields.io/github/v/release/yagcioglutoprak/ClaudeUsageBar)](https://github.com/yagcioglutoprak/ClaudeUsageBar/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/yagcioglutoprak/ClaudeUsageBar)](https://github.com/yagcioglutoprak/ClaudeUsageBar/commits/main)
+
+---
+
+## Why I built this
+
+I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall — so I built a tiny menu bar app that does.
 
 ---
 
@@ -66,6 +75,19 @@ WEEKLY LIMITS
 
 ---
 
+## Why not just check claude.ai/settings?
+
+| | ClaudeUsageBar | Open claude.ai/settings | Browser extension |
+|---|---|---|---|
+| Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
+| Notifications | ✅ 80% + 95% | ❌ None | ⚠️ Varies |
+| Privacy | ✅ Local only | ✅ | ⚠️ Depends on extension |
+| Install | ✅ One command | ✅ Nothing | ❌ Store + permissions |
+| Multi-provider | ✅ | ❌ | ❌ |
+| No Electron | ✅ ~900 lines Python | ✅ | ❌ Often Electron |
+
+---
+
 ## Requirements
 
 - macOS 12+
@@ -116,9 +138,32 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 ---
 
+## Roadmap
+
+- [ ] Homebrew formula (`brew install --cask claude-usage-bar`)
+- [ ] Linux system tray support
+- [ ] Windows tray app
+- [ ] Customizable notification thresholds
+- [ ] Usage history graph
+- [ ] Multiple Claude account support
+
+---
+
 ## Contributing
 
 PRs welcome. Open an issue first for large changes.
+
+To run in development:
+```bash
+git clone https://github.com/yagcioglutoprak/ClaudeUsageBar.git
+cd ClaudeUsageBar
+pip install -r requirements.txt
+python3 claude_bar.py
+```
+
+Logs are written to `~/.claude_bar.log`.
+
+---
 
 ## License
 
