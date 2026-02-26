@@ -18,6 +18,7 @@ from curl_cffi.requests.exceptions import HTTPError as CurlHTTPError
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import logging
@@ -444,11 +445,9 @@ def _status_icon(pct: int) -> str:
 def _row_lines(row: LimitRow) -> list[str]:
     bar = _bar(row.pct)
     icon = _status_icon(row.pct)
-    return [
-        f"  {icon} {row.label}",
-        f"  {bar}  {row.pct}%",
-        f"  {row.reset_str}" if row.reset_str else "",
-    ]
+    line1 = f"  {icon} {row.label}  {row.pct}%"
+    line2 = f"  {bar}  {row.reset_str}" if row.reset_str else f"  {bar}"
+    return [line1, line2]
 
 
 def _provider_lines(pd: ProviderData) -> list[str]:
@@ -574,59 +573,6 @@ def _clipboard_text() -> str:
         return ""
 
 
-_BUNDLE_TO_BROWSER = {
-    "com.google.chrome":           ("Chrome",   lambda: browser_cookie3.chrome),
-    "org.chromium.chromium":       ("Chromium", lambda: browser_cookie3.chromium),
-    "company.thebrowser.browser":  ("Arc",      lambda: browser_cookie3.arc),
-    "com.brave.browser":           ("Brave",    lambda: browser_cookie3.brave),
-    "com.microsoft.edgemac":       ("Edge",     lambda: browser_cookie3.edge),
-    "org.mozilla.firefox":         ("Firefox",  lambda: browser_cookie3.firefox),
-    "com.apple.safari":            ("Safari",   lambda: browser_cookie3.safari),
-    "com.operasoftware.opera":     ("Opera",    lambda: browser_cookie3.opera),
-    "com.vivaldi.vivaldi":         ("Vivaldi",  lambda: browser_cookie3.vivaldi),
-}
-
-# Firefox/LibreWolf first — no Keychain encryption, zero password prompts.
-# Chromium-based browsers require a one-time Keychain "Always Allow" click.
-_ALL_BROWSERS = [
-    ("Firefox",  lambda: browser_cookie3.firefox),
-    ("LibreWolf",lambda: browser_cookie3.librewolf),
-    ("Chrome",   lambda: browser_cookie3.chrome),
-    ("Arc",      lambda: browser_cookie3.arc),
-    ("Brave",    lambda: browser_cookie3.brave),
-    ("Edge",     lambda: browser_cookie3.edge),
-    ("Chromium", lambda: browser_cookie3.chromium),
-    ("Opera",    lambda: browser_cookie3.opera),
-    ("Vivaldi",  lambda: browser_cookie3.vivaldi),
-]
-
-
-def _default_browser_entry() -> tuple[str, object] | None:
-    """Return (name, loader) for the macOS default browser, or None."""
-    try:
-        r = subprocess.run(
-            ["defaults", "read",
-             "com.apple.LaunchServices/com.apple.launchservices.secure",
-             "LSHandlers"],
-            capture_output=True, text=True, timeout=5,
-        )
-        text = r.stdout
-        for block in text.split("{"):
-            if "LSHandlerURLScheme = https" in block and "LSHandlerRoleAll" in block:
-                for line in block.splitlines():
-                    line = line.strip()
-                    if line.startswith("LSHandlerRoleAll"):
-                        bundle = line.split("=")[-1].strip().strip('";')
-                        entry = _BUNDLE_TO_BROWSER.get(bundle)
-                        if entry:
-                            name, loader_fn = entry
-                            return name, loader_fn()
-    except Exception as e:
-        log.debug("_default_browser_entry failed: %s", e)
-    return None
-
-
-_KEYCHAIN_BROWSERS = {"Chrome", "Arc", "Brave", "Edge", "Chromium", "Opera", "Vivaldi"}
 _keychain_warned = False  # show the dialog at most once per session
 
 
@@ -649,65 +595,70 @@ def _warn_keychain_once():
     )
 
 
-def _auto_detect_cookies() -> str | None:
-    """Try to read claude.ai cookies — default browser first, then all others.
+# Script run in a child process — isolates browser_cookie3 C-library crashes
+# (libcrypto / sqlite segfaults on Chromium decryption don't kill the main app).
+_DETECT_SCRIPT = r"""
+import sys, json
 
-    Firefox/LibreWolf: zero prompts (cookies stored unencrypted).
-    Chromium-based: one-time macOS Keychain 'Always Allow' prompt, then silent.
-    """
+domain  = sys.argv[1]
+target  = sys.argv[2]
+result  = None
+
+BROWSERS = [
+    'firefox', 'librewolf', 'chrome', 'arc', 'brave',
+    'edge', 'chromium', 'opera', 'vivaldi',
+]
+
+try:
+    import browser_cookie3
+    for name in BROWSERS:
+        fn = getattr(browser_cookie3, name, None)
+        if fn is None:
+            continue
+        try:
+            jar = fn(domain_name=domain)
+            c = {x.name: x.value for x in jar}
+            if target in c:
+                result = '; '.join(f'{k}={v}' for k, v in c.items())
+                break
+        except Exception:
+            pass
+except Exception:
+    pass
+
+print(json.dumps(result))
+"""
+
+
+def _run_cookie_detection(domain: str, target_cookie: str) -> str | None:
+    """Run browser_cookie3 in an isolated child process (crash-safe)."""
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", _DETECT_SCRIPT, domain, target_cookie],
+            capture_output=True, text=True, timeout=60,
+        )
+        log.debug("cookie-detect rc=%d out=%r err=%r",
+                  r.returncode, r.stdout[:200], r.stderr[:200])
+        if r.stdout.strip():
+            return json.loads(r.stdout.strip())
+    except Exception as e:
+        log.debug("_run_cookie_detection failed: %s", e)
+    return None
+
+
+def _auto_detect_cookies() -> str | None:
+    """Detect claude.ai session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-
-    # Build ordered list: default browser first, then the rest
-    default = _default_browser_entry()
-    if default:
-        default_name, default_loader = default
-        ordered = [(default_name, default_loader)] + [
-            (n, lf()) for n, lf in _ALL_BROWSERS if n != default_name
-        ]
-    else:
-        ordered = [(n, lf()) for n, lf in _ALL_BROWSERS]
-
-    for name, loader in ordered:
-        if name in _KEYCHAIN_BROWSERS:
-            _warn_keychain_once()
-        try:
-            jar = loader(domain_name="claude.ai")
-            cookies = {c.name: c.value for c in jar}
-            if "sessionKey" in cookies:
-                cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
-                log.info("Auto-detected cookies from %s (%d keys)", name, len(cookies))
-                return cookie_str
-        except Exception as e:
-            log.debug("browser_cookie3 %s failed: %s", name, e)
-    return None
+    _warn_keychain_once()
+    return _run_cookie_detection("claude.ai", "sessionKey")
 
 
 def _auto_detect_chatgpt_cookies() -> str | None:
-    """Read chatgpt.com cookies from the browser — same approach as Claude."""
+    """Detect chatgpt.com session cookies from the browser (crash-safe subprocess)."""
     if not _BROWSER_COOKIE3_OK:
         return None
-    default = _default_browser_entry()
-    if default:
-        default_name, default_loader = default
-        ordered = [(default_name, default_loader)] + [
-            (n, lf()) for n, lf in _ALL_BROWSERS if n != default_name
-        ]
-    else:
-        ordered = [(n, lf()) for n, lf in _ALL_BROWSERS]
-    for name, loader in ordered:
-        if name in _KEYCHAIN_BROWSERS:
-            _warn_keychain_once()
-        try:
-            jar = loader(domain_name="chatgpt.com")
-            cookies = {c.name: c.value for c in jar}
-            if "__Secure-next-auth.session-token" in cookies:
-                cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
-                log.info("Auto-detected ChatGPT cookies from %s (%d keys)", name, len(cookies))
-                return cookie_str
-        except Exception as e:
-            log.debug("chatgpt browser_cookie3 %s: %s", name, e)
-    return None
+    return _run_cookie_detection("chatgpt.com", "__Secure-next-auth.session-token")
 
 
 def _notify(title: str, subtitle: str, message: str = ""):
@@ -748,9 +699,17 @@ class ClaudeBar(rumps.App):
 
         self._refresh_interval = self.config.get("refresh_interval", DEFAULT_REFRESH)
 
+        # Thread-safe UI update queue (background thread → main thread)
+        self._ui_pending_title: str | None = None
+        self._ui_pending_data: UsageData | None = None
+        self._ui_lock = threading.Lock()
+
         self._rebuild_menu(None)
         self._timer = rumps.Timer(self._on_timer, self._refresh_interval)
         self._timer.start()
+        # Fast ticker: drains pending UI updates on the main thread (avoids AppKit crashes)
+        self._ui_ticker = rumps.Timer(self._flush_ui, 0.25)
+        self._ui_ticker.start()
 
         # Always try to fetch on startup — browser JS works even without saved cookies
         self._schedule_fetch()
@@ -760,51 +719,56 @@ class ClaudeBar(rumps.App):
     def _rebuild_menu(self, data: UsageData | None):
         items: list = []
 
+        # ── ◆  CLAUDE section ─────────────────────────────────────────────
+        items.append(_mi("◆  CLAUDE"))
+        items.append(None)
+
         if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
-            items += [_mi("No data — set session cookie first"), None]
+            items.append(_mi("  No data — click Auto-detect from Browser"))
         else:
-            # ── Section 1: Plan usage limits ────────────────────────────
-            items.append(_mi("PLAN USAGE LIMITS"))
-            items.append(None)
             if data.session:
                 for line in _row_lines(data.session):
-                    if line:
-                        items.append(_mi(line))
+                    items.append(_mi(line))
                 items.append(None)
 
-            # ── Section 2: Weekly limits ────────────────────────────────
-            items.append(_mi("WEEKLY LIMITS"))
-            items.append(None)
             for row in [data.weekly_all, data.weekly_sonnet]:
                 if row:
                     for line in _row_lines(row):
-                        if line:
-                            items.append(_mi(line))
+                        items.append(_mi(line))
                     items.append(None)
 
-            # ── Section 3: Extra usage ──────────��───────────────────────
-            items.append(_mi("EXTRA USAGE"))
-            items.append(None)
             if data.overages_enabled is not None:
-                status = "✅ On" if data.overages_enabled else "⛔ Off"
-                items.append(_mi(f"  Extra usage: {status}"))
-            else:
-                items.append(_mi("  (not available)"))
-            items.append(None)
-
-            # ── Last updated ────────────────────────────────────────────
-            if self._last_updated:
-                t = self._last_updated.strftime("%H:%M:%S")
-                items.append(_mi(f"  Updated at {t}"))
+                status = "✅  On" if data.overages_enabled else "⛔  Off"
+                items.append(_mi(f"  Extra usage  {status}"))
                 items.append(None)
 
-        # ── Third-party providers ─────────────────────────────────────────
+        # ── ◇  CHATGPT section (if detected) ──────────────────────────────
+        chatgpt_pd = next(
+            (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
+        )
+        if chatgpt_pd:
+            items.append(_mi("◇  CHATGPT"))
+            items.append(None)
+            for line in _provider_lines(chatgpt_pd):
+                if line:
+                    items.append(_mi(line))
+            items.append(None)
+
+        # ── Other API providers ────────────────────────────────────────────
         for pd in self._provider_data:
-            items.append(_mi(pd.name.upper()))
+            if pd.name == "ChatGPT":
+                continue
+            items.append(_mi(f"  {pd.name}"))
             items.append(None)
             for line in _provider_lines(pd):
                 if line:
                     items.append(_mi(line))
+            items.append(None)
+
+        # ── Footer ────────────────────────────────────────────────────────
+        if self._last_updated:
+            t = self._last_updated.strftime("%H:%M")
+            items.append(_mi(f"  Updated {t}"))
             items.append(None)
 
         # ── Actions ──────────────────────────────────────────────────────
@@ -816,7 +780,7 @@ class ClaudeBar(rumps.App):
         interval_menu = rumps.MenuItem("Refresh Interval")
         for label, secs in REFRESH_INTERVALS.items():
             item = rumps.MenuItem(
-                ("✓ " if secs == self._refresh_interval else "  ") + label,
+                ("✓ " if secs == self._refresh_interval else "   ") + label,
                 callback=self._make_interval_cb(secs, label),
             )
             interval_menu.add(item)
@@ -843,8 +807,7 @@ class ClaudeBar(rumps.App):
         items.append(rumps.MenuItem("Show Raw API Data…", callback=self._show_raw))
         items.append(None)
 
-        # Launch at login toggle
-        login_label = "✓ Launch at Login" if _is_login_item() else "  Launch at Login"
+        login_label = "✓ Launch at Login" if _is_login_item() else "   Launch at Login"
         items.append(rumps.MenuItem(login_label, callback=self._toggle_login_item))
 
         items.append(None)
@@ -852,6 +815,30 @@ class ClaudeBar(rumps.App):
 
         self.menu.clear()
         self.menu = items
+
+    # ── thread-safe UI helpers ────────────────────────────────────────────────
+
+    def _post_title(self, title: str):
+        """Queue a title update from any thread."""
+        with self._ui_lock:
+            self._ui_pending_title = title
+
+    def _post_data(self, data: UsageData):
+        """Queue a full UI update (title + menu) from any thread."""
+        with self._ui_lock:
+            self._ui_pending_data = data
+
+    def _flush_ui(self, _timer):
+        """Main-thread ticker: apply any queued updates from background threads."""
+        with self._ui_lock:
+            title = self._ui_pending_title
+            data = self._ui_pending_data
+            self._ui_pending_title = None
+            self._ui_pending_data = None
+        if data is not None:
+            self._apply(data)
+        elif title is not None:
+            self.title = title
 
     # ── fetch ─────────────────────────────────────────────────────────────────
 
@@ -865,10 +852,7 @@ class ClaudeBar(rumps.App):
 
     def _fetch_and_update(self):
         self._fetching = True
-
-        # Show loading state
-        current = self.title or "◆"
-        self.title = current.split(" ")[0] + " …"
+        self._post_title("◆ …")
 
         try:
             sk = self.config.get("cookie_str")
@@ -878,7 +862,7 @@ class ClaudeBar(rumps.App):
                     self.config["cookie_str"] = sk
                     save_config(self.config)
             if not sk:
-                self.title = "◆"
+                self._post_title("◆")
                 self._fetching = False
                 return
             raw = fetch_raw(sk)
@@ -890,16 +874,15 @@ class ClaudeBar(rumps.App):
             log.debug("parsed UsageData: %s", data)
             self._check_warnings(data)
             self._fetch_providers()
-            self._apply(data)
+            self._post_data(data)          # ← main thread applies title + menu
         except CurlHTTPError as e:
             code = getattr(e, "code", 0) or 0
             log.error("HTTP error: %s", e, exc_info=True)
             if code in (401, 403):
                 self._auth_fail_count += 1
-                self.title = "◆ !"
+                self._post_title("◆ !")
                 if self._auth_fail_count >= 2:
                     self._auth_fail_count = 0
-                    # Try auto-detect first before prompting the user
                     cookie_str = _auto_detect_cookies()
                     if cookie_str:
                         self.config["cookie_str"] = cookie_str
@@ -914,10 +897,10 @@ class ClaudeBar(rumps.App):
                             "Click: Set Session Cookie… or Auto-detect from Browser",
                         )
             else:
-                self.title = "◆ err"
+                self._post_title("◆ err")
         except Exception:
             log.exception("fetch failed")
-            self.title = "◆ ?"
+            self._post_title("◆ ?")
         finally:
             self._fetching = False
 
@@ -1107,7 +1090,7 @@ class ClaudeBar(rumps.App):
             self._schedule_fetch()
 
     def _auto_detect_menu(self, _sender):
-        """Menu item: manually trigger auto-detect."""
+        """Menu item: manually trigger auto-detect (runs in background thread)."""
         if not _BROWSER_COOKIE3_OK:
             _notify(
                 "Claude Usage Bar",
@@ -1115,17 +1098,23 @@ class ClaudeBar(rumps.App):
                 "Run: pip install browser-cookie3",
             )
             return
-        cookie_str = _auto_detect_cookies()
+        # Run cookie detection in a background thread — browser_cookie3 accesses
+        # SQLite databases and Keychain which can hard-crash if called on the main thread.
+        threading.Thread(target=self._do_auto_detect, daemon=True).start()
+
+    def _do_auto_detect(self):
+        """Background: detect cookies then schedule a fetch."""
+        try:
+            cookie_str = _auto_detect_cookies()
+        except Exception:
+            log.exception("_auto_detect_cookies failed")
+            cookie_str = None
         if cookie_str:
             self.config["cookie_str"] = cookie_str
             save_config(self.config)
             self._warned_pcts.clear()
             self._auth_fail_count = 0
-            _notify(
-                "Claude Usage Bar",
-                "Cookies auto-detected ✓",
-                "Fetching usage data…",
-            )
+            _notify("Claude Usage Bar", "Cookies auto-detected ✓", "Fetching usage data…")
             self._schedule_fetch()
         else:
             _notify(
