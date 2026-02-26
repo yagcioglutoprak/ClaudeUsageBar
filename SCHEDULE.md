@@ -11,8 +11,11 @@
 |------|----------|--------|-------|
 | 2026-02-26 | Hacker News | 🔄 Live (1pt) | Posted, needs comments |
 | 2026-02-26 | r/ClaudeAI | ❌ Rejected | Repost with fixed version below (wait 1h) |
+| 2026-02-26 | awesome-mac PR #1833 | 🔄 Open | Waiting on FOSSA license scan + maintainer |
+| 2026-02-26 | open-source-mac-os-apps PR #1041 | 🔄 Open | Waiting on maintainer workflow approval |
 | 2026-02-27 | r/MacApps | ⏳ Pending | |
 | 2026-02-27 | r/ChatGPT | ⏳ Pending | Post a few hours after r/MacApps |
+| 2026-02-28 | awesome-claude-code | ⚠️ Manual only | 2-day cooldown expires — MUST submit via browser (see section below) |
 | 2026-02-28 | r/Python | ⏳ Pending | Technical angle |
 | 2026-02-28 | r/macOS | ⏳ Pending | |
 | 2026-03-01 | r/ClaudeCode | ⏳ Pending | |
@@ -21,6 +24,31 @@
 | When 225 ⭐ | homebrew-core PR | ⏳ Waiting | Formula is ready, just resubmit |
 
 **Best posting time for all platforms:** Tuesday–Thursday, 9–11 AM EST
+
+---
+
+## ⚠️ awesome-claude-code — MANUAL SUBMISSION REQUIRED (2026-02-28)
+
+**DO NOT use gh CLI or any automation — the maintainer has bot detection and will extend the ban.**
+**Cooldown expires: 2026-02-28. Submit via browser only.**
+
+**URL:** https://github.com/hesreallyhim/awesome-claude-code/issues/new?template=recommend-resource.yml
+
+| Field | Value |
+|-------|-------|
+| Display Name | `AIQuotaBar` |
+| Category | `Tooling` |
+| Sub-Category | `Tooling: Usage Monitors` |
+| Primary Link | `https://github.com/yagcioglutoprak/AIQuotaBar` |
+| Author Name | `yagcioglutoprak` |
+| Author Link | `https://github.com/yagcioglutoprak` |
+| License | `MIT` |
+| Description | `macOS menu bar app that shows live Claude.ai session and weekly usage limits as a color-coded percentage. Reads browser cookies locally from Chrome, Arc, Firefox, or Brave — no setup required. Also tracks ChatGPT usage in the same indicator.` |
+| Validate Claims | `Install with one command, then check your menu bar — the Claude usage % updates every 5 minutes automatically.` |
+| Specific Task | `Install AIQuotaBar and watch the menu bar update with your current Claude session usage in real time.` |
+| Specific Prompt | `curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh \| bash` |
+
+Check all boxes including "I am primarily composed of human-y stuff and not electrical circuits."
 
 ---
 
