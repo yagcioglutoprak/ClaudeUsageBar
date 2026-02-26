@@ -538,8 +538,7 @@ def _status_icon(pct: int) -> str:
 
 def _row_lines(row: LimitRow) -> list[str]:
     bar = _bar(row.pct)
-    icon = _status_icon(row.pct)
-    line1 = f"  {icon} {row.label}  {row.pct}%"
+    line1 = f"  {row.label}  {row.pct}%"
     line2 = f"  {bar}  {row.reset_str}" if row.reset_str else f"  {bar}"
     return [line1, line2]
 
@@ -560,14 +559,13 @@ def _provider_lines(pd: ProviderData) -> list[str]:
     # Standard spending / balance format
     lines = []
     if pd.pct is not None:
-        icon = _status_icon(pd.pct)
         bar = _bar(pd.pct)
-        lines.append(f"  {icon} {sym}{pd.spent:.2f} / {sym}{pd.limit:.2f} {pd.period}")
+        lines.append(f"  {sym}{pd.spent:.2f} / {sym}{pd.limit:.2f} {pd.period}")
         lines.append(f"  {bar}  {pd.pct}%")
     elif pd.balance is not None:
-        lines.append(f"  💰 {sym}{pd.balance:.2f} remaining")
+        lines.append(f"  {sym}{pd.balance:.2f} remaining")
     elif pd.spent is not None:
-        lines.append(f"  💰 {sym}{pd.spent:.2f} {pd.period}")
+        lines.append(f"  {sym}{pd.spent:.2f} {pd.period}")
     return lines
 
 
@@ -635,7 +633,7 @@ def _section_header_mi(title: str, icon_filename: str | None,
         g = int(color_hex[3:5], 16) / 255
         b = int(color_hex[5:7], 16) / 255
         color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
-        font = NSFont.boldSystemFontOfSize_(12)
+        font = NSFont.boldSystemFontOfSize_(13)
         attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
         astr = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
         item._menuitem.setAttributedTitle_(astr)
@@ -869,6 +867,9 @@ class ClaudeBar(rumps.App):
         self._ui_pending_data: UsageData | None = None
         self._ui_lock = threading.Lock()
 
+        if not _is_login_item():
+            _add_login_item()
+
         self._rebuild_menu(None)
         self._timer = rumps.Timer(self._on_timer, self._refresh_interval)
         self._timer.start()
@@ -885,8 +886,7 @@ class ClaudeBar(rumps.App):
         items: list = []
 
         # ── ◆  CLAUDE section ─────────────────────────────────────────────
-        items.append(_section_header_mi("  CLAUDE", "claude_icon.png", "#D97757"))
-        items.append(None)
+        items.append(_section_header_mi("  Claude", "claude_icon.png", "#D97757"))
 
         if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
             items.append(_mi("  No data — click Auto-detect from Browser"))
@@ -914,9 +914,8 @@ class ClaudeBar(rumps.App):
             (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
         )
         if chatgpt_pd:
-            items.append(_section_header_mi("  CHATGPT", "chatgpt_icon_clean.png",
+            items.append(_section_header_mi("  ChatGPT", "chatgpt_icon_clean.png",
                                             "#74AA9C", icon_tint="#74AA9C"))
-            items.append(None)
             rows = getattr(chatgpt_pd, "_rows", None)
             if rows:
                 for row in rows:
@@ -933,8 +932,7 @@ class ClaudeBar(rumps.App):
         # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
         if self._cc_stats:
             cc = self._cc_stats
-            items.append(_section_header_mi("  CLAUDE CODE", "claude_icon.png", "#D97757"))
-            items.append(None)
+            items.append(_section_header_mi("  Claude Code", "claude_icon.png", "#D97757"))
             if cc["today_messages"] > 0:
                 items.append(_mi(
                     f"  Today     {_fmt_count(cc['today_messages'])} msgs"
@@ -977,10 +975,8 @@ class ClaudeBar(rumps.App):
         # Refresh interval submenu
         interval_menu = rumps.MenuItem("Refresh Interval")
         for label, secs in REFRESH_INTERVALS.items():
-            item = rumps.MenuItem(
-                ("✓ " if secs == self._refresh_interval else "   ") + label,
-                callback=self._make_interval_cb(secs, label),
-            )
+            item = rumps.MenuItem(label, callback=self._make_interval_cb(secs, label))
+            item._menuitem.setState_(1 if secs == self._refresh_interval else 0)
             interval_menu.add(item)
         items.append(interval_menu)
         items.append(None)
@@ -1005,8 +1001,9 @@ class ClaudeBar(rumps.App):
         items.append(rumps.MenuItem("Show Raw API Data…", callback=self._show_raw))
         items.append(None)
 
-        login_label = "✓ Launch at Login" if _is_login_item() else "   Launch at Login"
-        items.append(rumps.MenuItem(login_label, callback=self._toggle_login_item))
+        login_item = rumps.MenuItem("Launch at Login", callback=self._toggle_login_item)
+        login_item._menuitem.setState_(1 if _is_login_item() else 0)
+        items.append(login_item)
 
         items.append(None)
         items.append(rumps.MenuItem("Quit", callback=rumps.quit_application))
@@ -1374,14 +1371,15 @@ class ClaudeBar(rumps.App):
         text = json.dumps(self._last_raw.get("usage", self._last_raw), indent=2)
         _show_text(title="Claude Usage — Raw API Response", text=text)
 
-    def _toggle_login_item(self, _sender):
+    def _toggle_login_item(self, sender):
         if _is_login_item():
             _remove_login_item()
+            sender._menuitem.setState_(0)
             _notify("Claude Usage Bar", "Removed from Login Items", "")
         else:
             _add_login_item()
-            _notify("Claude Usage Bar", "Added to Login Items ✓", "Will launch automatically on login")
-        self._rebuild_menu(self._last_data)
+            sender._menuitem.setState_(1)
+            _notify("Claude Usage Bar", "Added to Login Items", "Will launch automatically on login")
 
     def _try_auto_detect(self):
         """Background: silently try to grab cookies from the browser on first run."""
