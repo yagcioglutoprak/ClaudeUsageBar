@@ -54,6 +54,15 @@ DEFAULT_REFRESH = 300
 WARN_THRESHOLD = 80   # notify when any limit crosses this %
 CRIT_THRESHOLD = 95   # title turns red emoji above this %
 
+# ── notification defaults ─────────────────────────────────────────────────────
+# Keys stored in config under "notifications": { key: bool }
+_NOTIF_DEFAULTS = {
+    "claude_reset":   True,   # notify when Claude session/weekly resets
+    "chatgpt_reset":  True,   # notify when ChatGPT rate-limit resets
+    "claude_warning": True,   # notify when Claude usage crosses WARN/CRIT
+    "chatgpt_warning":True,   # notify when ChatGPT usage crosses WARN/CRIT
+}
+
 # ── config ────────────────────────────────────────────────────────────────────
 
 def load_config() -> dict:
@@ -66,6 +75,17 @@ def load_config() -> dict:
 def save_config(cfg: dict):
     with open(CONFIG_FILE, "w") as f:
         json.dump(cfg, f, indent=2)
+
+
+def _notif_enabled(cfg: dict, key: str) -> bool:
+    """Return True if the named notification is enabled (defaults to True)."""
+    return cfg.get("notifications", {}).get(key, _NOTIF_DEFAULTS.get(key, True))
+
+
+def _set_notif(cfg: dict, key: str, value: bool):
+    """Persist a single notification toggle."""
+    cfg.setdefault("notifications", {})[key] = value
+    save_config(cfg)
 
 
 # ── data models ───────────────────────────────────────────────────────────────
@@ -768,7 +788,7 @@ result  = None
 
 BROWSERS = [
     'firefox', 'librewolf', 'chrome', 'arc', 'brave',
-    'edge', 'chromium', 'opera', 'vivaldi',
+    'edge', 'chromium', 'opera', 'vivaldi', 'safari',
 ]
 
 try:
@@ -855,6 +875,7 @@ class ClaudeBar(rumps.App):
         self._last_data: UsageData | None = None
         self._provider_data: list[ProviderData] = []
         self._warned_pcts: set[str] = set()   # track which rows we've notified
+        self._prev_pcts: dict[str, int] = {}  # previous pct per row key (reset detection)
         self._auth_fail_count = 0
         self._fetching = False
         self._last_updated: datetime | None = None
@@ -979,6 +1000,20 @@ class ClaudeBar(rumps.App):
             item._menuitem.setState_(1 if secs == self._refresh_interval else 0)
             interval_menu.add(item)
         items.append(interval_menu)
+
+        # Notifications submenu
+        notif_menu = rumps.MenuItem("Notifications")
+        _notif_labels = [
+            ("claude_warning",  "Claude — usage warnings (80% / 95%)"),
+            ("claude_reset",    "Claude — reset alerts"),
+            ("chatgpt_warning", "ChatGPT — usage warnings (80% / 95%)"),
+            ("chatgpt_reset",   "ChatGPT — reset alerts"),
+        ]
+        for nkey, nlabel in _notif_labels:
+            item = rumps.MenuItem(nlabel, callback=self._make_notif_toggle_cb(nkey))
+            item._menuitem.setState_(1 if _notif_enabled(self.config, nkey) else 0)
+            notif_menu.add(item)
+        items.append(notif_menu)
         items.append(None)
 
         # API providers submenu
@@ -1047,7 +1082,6 @@ class ClaudeBar(rumps.App):
 
     def _fetch_and_update(self):
         self._fetching = True
-        self._post_title("◆ …")
 
         try:
             sk = self.config.get("cookie_str")
@@ -1069,6 +1103,7 @@ class ClaudeBar(rumps.App):
             log.debug("parsed UsageData: %s", data)
             self._check_warnings(data)
             self._fetch_providers()
+            self._check_provider_warnings(self._provider_data)
             self._cc_stats = fetch_claude_code_stats()
             self._post_data(data)          # ← main thread applies title + menu
         except CurlHTTPError as e:
@@ -1101,35 +1136,102 @@ class ClaudeBar(rumps.App):
             self._fetching = False
 
     def _check_warnings(self, data: UsageData):
-        """Send macOS notification when a limit crosses the warning threshold."""
+        """Send macOS notification when a Claude limit crosses a threshold or resets."""
         rows = [
-            (data.session, "session"),
-            (data.weekly_all, "weekly_all"),
+            (data.session,       "session"),
+            (data.weekly_all,    "weekly_all"),
             (data.weekly_sonnet, "weekly_sonnet"),
         ]
+        warn_enabled = _notif_enabled(self.config, "claude_warning")
+        reset_enabled = _notif_enabled(self.config, "claude_reset")
+
         for row, key in rows:
             if row is None:
                 continue
             warn_key = f"{key}_{WARN_THRESHOLD}"
             crit_key = f"{key}_{CRIT_THRESHOLD}"
-            if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
-                self._warned_pcts.add(crit_key)
-                _notify(
-                    "Claude Usage Bar 🔴",
-                    f"{row.label} is at {row.pct}%!",
-                    row.reset_str or "Limit almost reached",
-                )
-            elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
-                self._warned_pcts.add(warn_key)
-                _notify(
-                    "Claude Usage Bar 🟡",
-                    f"{row.label} is at {row.pct}%",
-                    row.reset_str or "Approaching limit",
-                )
-            elif row.pct < WARN_THRESHOLD:
-                # Reset warnings when usage drops (after a reset)
+            prev = self._prev_pcts.get(key)
+
+            # Reset detection: pct dropped significantly (≥10 pp) from above-warn to below
+            if (reset_enabled and prev is not None
+                    and prev >= WARN_THRESHOLD and row.pct < WARN_THRESHOLD
+                    and (prev - row.pct) >= 10):
                 self._warned_pcts.discard(warn_key)
                 self._warned_pcts.discard(crit_key)
+                _notify(
+                    "Claude Usage Bar ✅",
+                    f"{row.label} has reset!",
+                    f"Now at {row.pct}% — you're good to go.",
+                )
+
+            if warn_enabled:
+                if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
+                    self._warned_pcts.add(crit_key)
+                    _notify(
+                        "Claude Usage Bar 🔴",
+                        f"{row.label} is at {row.pct}%!",
+                        row.reset_str or "Limit almost reached",
+                    )
+                elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
+                    self._warned_pcts.add(warn_key)
+                    _notify(
+                        "Claude Usage Bar 🟡",
+                        f"{row.label} is at {row.pct}%",
+                        row.reset_str or "Approaching limit",
+                    )
+                elif row.pct < WARN_THRESHOLD:
+                    self._warned_pcts.discard(warn_key)
+                    self._warned_pcts.discard(crit_key)
+
+            self._prev_pcts[key] = row.pct
+
+    def _check_provider_warnings(self, provider_data: list):
+        """Send macOS notification when ChatGPT rate limits cross a threshold or reset."""
+        chatgpt_pd = next((pd for pd in provider_data if pd.name == "ChatGPT"), None)
+        if chatgpt_pd is None or chatgpt_pd.error:
+            return
+
+        rows = getattr(chatgpt_pd, "_rows", None) or []
+        warn_enabled = _notif_enabled(self.config, "chatgpt_warning")
+        reset_enabled = _notif_enabled(self.config, "chatgpt_reset")
+
+        for row in rows:
+            key = f"chatgpt_{row.label}"
+            warn_key = f"{key}_{WARN_THRESHOLD}"
+            crit_key = f"{key}_{CRIT_THRESHOLD}"
+            prev = self._prev_pcts.get(key)
+
+            if (reset_enabled and prev is not None
+                    and prev >= WARN_THRESHOLD and row.pct < WARN_THRESHOLD
+                    and (prev - row.pct) >= 10):
+                self._warned_pcts.discard(warn_key)
+                self._warned_pcts.discard(crit_key)
+                _notify(
+                    "Claude Usage Bar ✅",
+                    f"ChatGPT {row.label} has reset!",
+                    f"Now at {row.pct}% — you're good to go.",
+                )
+
+            if warn_enabled:
+                if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
+                    self._warned_pcts.add(crit_key)
+                    _notify(
+                        "Claude Usage Bar 🔴",
+                        f"ChatGPT {row.label} is at {row.pct}%!",
+                        row.reset_str or "Limit almost reached",
+                    )
+                elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
+                    self._warned_pcts.add(warn_key)
+                    _notify(
+                        "Claude Usage Bar 🟡",
+                        f"ChatGPT {row.label} is at {row.pct}%",
+                        row.reset_str or "Approaching limit",
+                    )
+                elif row.pct < WARN_THRESHOLD:
+                    self._warned_pcts.discard(warn_key)
+                    self._warned_pcts.discard(crit_key)
+
+            self._prev_pcts[key] = row.pct
 
     def _set_bar_title(self, pct: int, extra: str = "",
                        chatgpt_pct: int | None = None,
@@ -1267,7 +1369,7 @@ class ClaudeBar(rumps.App):
     def _share_on_x(self, _sender):
         data = self._last_data
         if data and data.session:
-            pct = int(data.session.percentage)
+            pct = int(data.session.pct)
             icon = _status_icon(pct)
             text = (
                 f"I'm at {pct}% of my Claude session limit {icon}\n"
@@ -1316,6 +1418,13 @@ class ClaudeBar(rumps.App):
             self._schedule_fetch()
         return _cb
 
+    def _make_notif_toggle_cb(self, nkey: str):
+        def _cb(sender):
+            current = _notif_enabled(self.config, nkey)
+            _set_notif(self.config, nkey, not current)
+            sender._menuitem.setState_(0 if current else 1)
+        return _cb
+
     def _make_interval_cb(self, secs: int, label: str):
         def _cb(_sender):
             self._refresh_interval = secs
@@ -1331,11 +1440,11 @@ class ClaudeBar(rumps.App):
         key = _ask_text(
             title="Claude Usage — Set Cookies",
             prompt=(
-                "Paste ALL cookies from claude.ai (needed to bypass Cloudflare)\\n\\n"
-                "How to get them:\\n"
-                "  1. Open https://claude.ai/settings/usage in Chrome\\n"
-                "  2. F12 → Network tab → click any request to claude.ai\\n"
-                "  3. In Headers, find the 'cookie:' row\\n"
+                "Paste ALL cookies from claude.ai (needed to bypass Cloudflare)\n\n"
+                "How to get them:\n"
+                "  1. Open https://claude.ai/settings/usage in Chrome\n"
+                "  2. F12 → Network tab → click any request to claude.ai\n"
+                "  3. In Headers, find the 'cookie:' row\n"
                 "  4. Right-click it → Copy value  (long string with semicolons)"
             ),
             default=self.config.get("cookie_str", ""),
