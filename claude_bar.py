@@ -427,6 +427,47 @@ def parse_usage(raw: dict) -> UsageData:
     )
 
 
+# ── Claude Code local stats ───────────────────────────────────────────────────
+
+CC_STATS_FILE = os.path.expanduser("~/.claude/stats-cache.json")
+
+
+def fetch_claude_code_stats() -> dict | None:
+    """Read Claude Code usage from ~/.claude/stats-cache.json (no network needed).
+
+    Returns dict with today_messages, today_sessions, week_messages,
+    week_sessions, week_tool_calls — or None if the file doesn't exist.
+    """
+    if not os.path.exists(CC_STATS_FILE):
+        return None
+    try:
+        with open(CC_STATS_FILE) as f:
+            data = json.load(f)
+        today = datetime.now().strftime("%Y-%m-%d")
+        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        entries = data.get("dailyActivity", [])
+        today_e = next((e for e in entries if e["date"] == today), None)
+        week_e  = [e for e in entries if e["date"] >= week_ago]
+        return {
+            "today_messages":   today_e["messageCount"]  if today_e else 0,
+            "today_sessions":   today_e["sessionCount"]  if today_e else 0,
+            "week_messages":    sum(e["messageCount"]  for e in week_e),
+            "week_sessions":    sum(e["sessionCount"]  for e in week_e),
+            "week_tool_calls":  sum(e["toolCallCount"] for e in week_e),
+            "last_date": max((e["date"] for e in entries), default=None),
+        }
+    except Exception as e:
+        log.debug("fetch_claude_code_stats failed: %s", e)
+        return None
+
+
+def _fmt_count(n: int) -> str:
+    """Format a message count compactly: 1234 → '1.2k', 999 → '999'."""
+    if n >= 1000:
+        return f"{n / 1000:.1f}k"
+    return str(n)
+
+
 # ── display helpers ───────────────────────────────────────────────────────────
 
 def _bar(pct: int, width: int = 14) -> str:
@@ -698,6 +739,7 @@ class ClaudeBar(rumps.App):
         self._last_updated: datetime | None = None
 
         self._refresh_interval = self.config.get("refresh_interval", DEFAULT_REFRESH)
+        self._cc_stats: dict | None = None   # Claude Code local stats
 
         # Thread-safe UI update queue (background thread → main thread)
         self._ui_pending_title: str | None = None
@@ -752,6 +794,27 @@ class ClaudeBar(rumps.App):
             for line in _provider_lines(chatgpt_pd):
                 if line:
                     items.append(_mi(line))
+            items.append(None)
+
+        # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
+        if self._cc_stats:
+            cc = self._cc_stats
+            items.append(_mi("◆  CLAUDE CODE"))
+            items.append(None)
+            if cc["today_messages"] > 0:
+                items.append(_mi(
+                    f"  Today     {_fmt_count(cc['today_messages'])} msgs"
+                    f"  ·  {cc['today_sessions']} sessions"
+                ))
+            wm = cc["week_messages"]
+            if wm > 0:
+                items.append(_mi(
+                    f"  This week  {_fmt_count(wm)} msgs"
+                    f"  ·  {cc['week_sessions']} sessions"
+                    f"  ·  {_fmt_count(cc['week_tool_calls'])} tools"
+                ))
+            if cc.get("last_date"):
+                items.append(_mi(f"  Last active  {cc['last_date']}"))
             items.append(None)
 
         # ── Other API providers ────────────────────────────────────────────
@@ -874,6 +937,7 @@ class ClaudeBar(rumps.App):
             log.debug("parsed UsageData: %s", data)
             self._check_warnings(data)
             self._fetch_providers()
+            self._cc_stats = fetch_claude_code_stats()
             self._post_data(data)          # ← main thread applies title + menu
         except CurlHTTPError as e:
             code = getattr(e, "code", 0) or 0
@@ -935,36 +999,61 @@ class ClaudeBar(rumps.App):
                 self._warned_pcts.discard(warn_key)
                 self._warned_pcts.discard(crit_key)
 
-    def _set_bar_title(self, pct: int, extra: str = ""):
-        """Set a native-looking attributed title: system-colored ● dot + percentage.
+    def _set_bar_title(self, pct: int, extra: str = "",
+                       chatgpt_pct: int | None = None,
+                       cc_msgs: int | None = None):
+        """Multi-indicator attributed title: ● 31%  ◇ 0%  ◆ 3.2k
 
-        Uses NSAttributedString so the dot uses the real macOS system green/orange/red
-        rather than a cartoon emoji. Falls back to emoji text if AppKit is unavailable.
+        Uses NSAttributedString so each indicator uses the correct
+        macOS system color. Falls back to plain emoji text if AppKit fails.
         """
         try:
             from AppKit import (NSColor, NSFont,
                                 NSForegroundColorAttributeName, NSFontAttributeName)
             from Foundation import NSMutableAttributedString
 
-            if pct >= CRIT_THRESHOLD:
-                dot_color = NSColor.systemRedColor()
-            elif pct >= WARN_THRESHOLD:
-                dot_color = NSColor.systemOrangeColor()
-            else:
-                dot_color = NSColor.systemGreenColor()
+            def _sys_color(p: int):
+                if p >= CRIT_THRESHOLD:  return NSColor.systemRedColor()
+                if p >= WARN_THRESHOLD:  return NSColor.systemOrangeColor()
+                return NSColor.systemGreenColor()
 
-            dot = "● "
-            num = f"{pct}%{extra}"
             font = NSFont.menuBarFontOfSize_(0)
-            attrs = {NSFontAttributeName: font} if font else {}
-            s = NSMutableAttributedString.alloc().initWithString_attributes_(dot + num, attrs)
-            s.addAttribute_value_range_(NSForegroundColorAttributeName, dot_color, (0, len(dot)))
+            base = {NSFontAttributeName: font} if font else {}
+
+            # Build list of (text, color|None) segments
+            segs: list[tuple[str, object]] = []
+            segs.append(("● ",              _sys_color(pct)))
+            segs.append((f"{pct}%{extra}",  None))
+
+            if chatgpt_pct is not None:
+                segs.append(("  ◇ ",                    None))
+                segs.append((f"{chatgpt_pct}%",  _sys_color(chatgpt_pct)))
+
+            if cc_msgs is not None and cc_msgs > 0:
+                segs.append(("  ◆ ",              None))
+                segs.append((_fmt_count(cc_msgs),  NSColor.systemBlueColor()))
+
+            full = "".join(t for t, _ in segs)
+            s = NSMutableAttributedString.alloc().initWithString_attributes_(full, base)
+            pos = 0
+            for text, color in segs:
+                if color is not None:
+                    s.addAttribute_value_range_(
+                        NSForegroundColorAttributeName, color, (pos, len(text))
+                    )
+                pos += len(text)
+
             self._nsapp.nsstatusitem.setAttributedTitle_(s)
             return
         except Exception as e:
             log.debug("_set_bar_title failed: %s", e)
-        # Fallback to plain emoji
-        self.title = f"{_status_icon(pct)} {pct}%{extra}"
+        # Plain-text fallback
+        parts = [f"{_status_icon(pct)} {pct}%{extra}"]
+        if chatgpt_pct is not None:
+            parts.append(f"◇ {chatgpt_pct}%")
+        if cc_msgs is not None and cc_msgs > 0:
+            parts.append(f"◆ {_fmt_count(cc_msgs)}")
+        self.title = "  ".join(parts)
 
     def _apply(self, data: UsageData):
         primary = data.session or data.weekly_all or data.weekly_sonnet
@@ -975,7 +1064,24 @@ class ClaudeBar(rumps.App):
             )
             extra = " ·" if (weekly_maxed and primary is data.session
                              and primary.pct < CRIT_THRESHOLD) else ""
-            self._set_bar_title(primary.pct, extra)
+
+            # ChatGPT Codex % for the bar (worst-case across all windows)
+            chatgpt_pd = next(
+                (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
+            )
+            chatgpt_pct: int | None = None
+            if chatgpt_pd and not chatgpt_pd.error:
+                rows = getattr(chatgpt_pd, "_rows", None)
+                if rows:
+                    chatgpt_pct = max(r.pct for r in rows)
+
+            # Claude Code weekly messages
+            cc_msgs: int | None = None
+            if self._cc_stats:
+                cc_msgs = self._cc_stats.get("week_messages")
+
+            self._set_bar_title(primary.pct, extra,
+                                chatgpt_pct=chatgpt_pct, cc_msgs=cc_msgs)
         else:
             self.title = "◆"
         self._rebuild_menu(data)
