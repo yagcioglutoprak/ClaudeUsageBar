@@ -1,6 +1,6 @@
 # Claude Usage Bar
 
-**See your Claude.ai usage limits live in your macOS menu bar.**
+**See your Claude.ai and ChatGPT usage limits live in your macOS menu bar.**
 
 No Electron. No browser extension. One command to install.
 
@@ -18,7 +18,7 @@ No Electron. No browser extension. One command to install.
 
 ## Why I built this
 
-I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall — so I built a tiny menu bar app that does.
+I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall. Same with ChatGPT. So I built a tiny menu bar app that shows both.
 
 ---
 
@@ -44,13 +44,11 @@ That's it. The app launches immediately and auto-detects your Claude session fro
 Open the menu for full detail:
 
 ```
-PLAN USAGE LIMITS
+CLAUDE
 
   🟢 Current Session
   ██░░░░░░░░░░░░  12%
   resets in 3h 41m
-
-WEEKLY LIMITS
 
   🟡 All Models
   ████████████░░  83%
@@ -59,6 +57,16 @@ WEEKLY LIMITS
   🟢 Sonnet Only
   ███░░░░░░░░░░░  22%
   resets Wed 23:00
+
+CHATGPT
+
+  🟢 Codex Tasks
+  █░░░░░░░░░░░░░  0%
+  resets Thu 05:38
+
+  🟢 Code Review
+  █░░░░░░░░░░░░░  0%
+  resets Thu 05:38
 ```
 
 ---
@@ -66,7 +74,8 @@ WEEKLY LIMITS
 ## Features
 
 - **Zero-setup auth** — reads cookies directly from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
-- **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside Claude usage
+- **Claude + ChatGPT** — tracks both Claude.ai session/weekly limits and ChatGPT usage in one place
+- **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside usage
 - **Auto-refresh on session expiry** — silently grabs fresh cookies when your session expires
 - **macOS notifications** — alerts at 80% and 95% usage
 - **Configurable refresh** — 1 / 5 / 15 min
@@ -75,15 +84,15 @@ WEEKLY LIMITS
 
 ---
 
-## Why not just check claude.ai/settings?
+## Why not just check the settings page?
 
-| | ClaudeUsageBar | Open claude.ai/settings | Browser extension |
+| | ClaudeUsageBar | Open settings page | Browser extension |
 |---|---|---|---|
 | Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
 | Notifications | ✅ 80% + 95% | ❌ None | ⚠️ Varies |
+| Claude + ChatGPT | ✅ Both in one place | ❌ One at a time | ❌ |
 | Privacy | ✅ Local only | ✅ | ⚠️ Depends on extension |
 | Install | ✅ One command | ✅ Nothing | ❌ Store + permissions |
-| Multi-provider | ✅ | ❌ | ❌ |
 | No Electron | ✅ ~900 lines Python | ✅ | ❌ Often Electron |
 
 ---
