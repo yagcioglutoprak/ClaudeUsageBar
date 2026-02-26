@@ -935,21 +935,47 @@ class ClaudeBar(rumps.App):
                 self._warned_pcts.discard(warn_key)
                 self._warned_pcts.discard(crit_key)
 
+    def _set_bar_title(self, pct: int, extra: str = ""):
+        """Set a native-looking attributed title: system-colored ● dot + percentage.
+
+        Uses NSAttributedString so the dot uses the real macOS system green/orange/red
+        rather than a cartoon emoji. Falls back to emoji text if AppKit is unavailable.
+        """
+        try:
+            from AppKit import (NSColor, NSFont,
+                                NSForegroundColorAttributeName, NSFontAttributeName)
+            from Foundation import NSMutableAttributedString
+
+            if pct >= CRIT_THRESHOLD:
+                dot_color = NSColor.systemRedColor()
+            elif pct >= WARN_THRESHOLD:
+                dot_color = NSColor.systemOrangeColor()
+            else:
+                dot_color = NSColor.systemGreenColor()
+
+            dot = "● "
+            num = f"{pct}%{extra}"
+            font = NSFont.menuBarFontOfSize_(0)
+            attrs = {NSFontAttributeName: font} if font else {}
+            s = NSMutableAttributedString.alloc().initWithString_attributes_(dot + num, attrs)
+            s.addAttribute_value_range_(NSForegroundColorAttributeName, dot_color, (0, len(dot)))
+            self._nsapp.nsstatusitem.setAttributedTitle_(s)
+            return
+        except Exception as e:
+            log.debug("_set_bar_title failed: %s", e)
+        # Fallback to plain emoji
+        self.title = f"{_status_icon(pct)} {pct}%{extra}"
+
     def _apply(self, data: UsageData):
-        # Session (5-hour) determines whether you can use Claude right now.
-        # Use it as the primary indicator; fall back to weekly only if no session data.
         primary = data.session or data.weekly_all or data.weekly_sonnet
         if primary:
-            icon = _status_icon(primary.pct)
-            # If session is fine but a weekly limit is maxed out, add a warning dot
             weekly_maxed = any(
                 r and r.pct >= CRIT_THRESHOLD
                 for r in [data.weekly_all, data.weekly_sonnet]
             )
-            if weekly_maxed and primary is data.session and primary.pct < CRIT_THRESHOLD:
-                self.title = f"{icon} {primary.pct}% ·"
-            else:
-                self.title = f"{icon} {primary.pct}%"
+            extra = " ·" if (weekly_maxed and primary is data.session
+                             and primary.pct < CRIT_THRESHOLD) else ""
+            self._set_bar_title(primary.pct, extra)
         else:
             self.title = "◆"
         self._rebuild_menu(data)
