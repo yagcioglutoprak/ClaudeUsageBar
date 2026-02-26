@@ -10,10 +10,10 @@ Submit these PRs to get passive discovery from high-star lists.
 
 **Line to add:**
 ```
-- [ClaudeUsageBar](https://github.com/yagcioglutoprak/ClaudeUsageBar) - macOS menu bar app showing Claude.ai session and weekly usage limits in real-time. Zero setup, reads local browser cookies.
+- [AIQuotaBar](https://github.com/yagcioglutoprak/AIQuotaBar) - macOS menu bar app showing Claude.ai session and weekly usage limits in real-time. Zero setup, reads local browser cookies.
 ```
 
-**PR title:** `Add ClaudeUsageBar — macOS menu bar usage tracker`
+**PR title:** `Add AIQuotaBar — macOS menu bar usage tracker`
 
 ---
 
@@ -23,10 +23,10 @@ Submit these PRs to get passive discovery from high-star lists.
 
 **Line to add:**
 ```
-- [ClaudeUsageBar](https://github.com/yagcioglutoprak/ClaudeUsageBar) - See your Claude.ai usage limits live in your macOS menu bar. ![python_lang](https://github.com/serhii-londar/open-source-mac-os-apps/blob/master/./icons/python-16.png?raw=true)
+- [AIQuotaBar](https://github.com/yagcioglutoprak/AIQuotaBar) - See your Claude.ai usage limits live in your macOS menu bar. ![python_lang](https://github.com/serhii-londar/open-source-mac-os-apps/blob/master/./icons/python-16.png?raw=true)
 ```
 
-**PR title:** `Add ClaudeUsageBar — Claude.ai usage tracker menu bar app`
+**PR title:** `Add AIQuotaBar — Claude.ai usage tracker menu bar app`
 
 ---
 
@@ -36,10 +36,10 @@ Submit these PRs to get passive discovery from high-star lists.
 
 **Line to add:**
 ```
-- [ClaudeUsageBar](https://github.com/yagcioglutoprak/ClaudeUsageBar) - See your Claude.ai usage limits live in your macOS menu bar. [![Open-Source Software](https://jaywcjlove.github.io/sb/ico/min-oss.svg)](https://github.com/yagcioglutoprak/ClaudeUsageBar) ![Freeware](https://jaywcjlove.github.io/sb/ico/min-free.svg)
+- [AIQuotaBar](https://github.com/yagcioglutoprak/AIQuotaBar) - See your Claude.ai usage limits live in your macOS menu bar. [![Open-Source Software](https://jaywcjlove.github.io/sb/ico/min-oss.svg)](https://github.com/yagcioglutoprak/AIQuotaBar) ![Freeware](https://jaywcjlove.github.io/sb/ico/min-free.svg)
 ```
 
-**PR title:** `Add ClaudeUsageBar — Claude.ai usage tracker for macOS menu bar`
+**PR title:** `Add AIQuotaBar — Claude.ai usage tracker for macOS menu bar`
 
 ---
 

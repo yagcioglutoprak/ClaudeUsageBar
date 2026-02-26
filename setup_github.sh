@@ -4,13 +4,13 @@
 
 set -e
 
-REPO="yagcioglutoprak/ClaudeUsageBar"
+REPO="yagcioglutoprak/AIQuotaBar"
 
 echo "Setting repo description and topics..."
 gh api repos/$REPO \
   --method PATCH \
   -f description="See your Claude.ai usage limits live in your macOS menu bar" \
-  -f homepage="https://github.com/yagcioglutoprak/ClaudeUsageBar"
+  -f homepage="https://github.com/yagcioglutoprak/AIQuotaBar"
 
 gh api repos/$REPO/topics \
   --method PUT \
@@ -35,7 +35,7 @@ See your Claude.ai usage limits live in your macOS menu bar.
 
 ### Install
 \`\`\`bash
-curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/ClaudeUsageBar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 \`\`\`
 
 ### What's included

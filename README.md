@@ -9,10 +9,10 @@ No Electron. No browser extension. One command to install.
 [![macOS](https://img.shields.io/badge/macOS-12%2B-black?logo=apple)](https://www.apple.com/macos/)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/yagcioglutoprak/ClaudeUsageBar?style=social)](https://github.com/yagcioglutoprak/ClaudeUsageBar/stargazers)
-[![Downloads](https://img.shields.io/github/downloads/yagcioglutoprak/ClaudeUsageBar/total)](https://github.com/yagcioglutoprak/ClaudeUsageBar/releases)
-[![Latest Release](https://img.shields.io/github/v/release/yagcioglutoprak/ClaudeUsageBar)](https://github.com/yagcioglutoprak/ClaudeUsageBar/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/yagcioglutoprak/ClaudeUsageBar)](https://github.com/yagcioglutoprak/ClaudeUsageBar/commits/main)
+[![Stars](https://img.shields.io/github/stars/yagcioglutoprak/AIQuotaBar?style=social)](https://github.com/yagcioglutoprak/AIQuotaBar/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/yagcioglutoprak/AIQuotaBar/total)](https://github.com/yagcioglutoprak/AIQuotaBar/releases)
+[![Latest Release](https://img.shields.io/github/v/release/yagcioglutoprak/AIQuotaBar)](https://github.com/yagcioglutoprak/AIQuotaBar/releases/latest)
+[![Last Commit](https://img.shields.io/github/last-commit/yagcioglutoprak/AIQuotaBar)](https://github.com/yagcioglutoprak/AIQuotaBar/commits/main)
 
 **Featured on Hacker News (161 points, 49 comments) · Product Hunt (382 upvotes)**
 
@@ -27,7 +27,7 @@ I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai do
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/ClaudeUsageBar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 ```
 
 That's it. The app launches immediately and auto-detects your Claude session from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
@@ -88,7 +88,7 @@ CHATGPT
 
 ## Why not just check the settings page?
 
-| | ClaudeUsageBar | Open settings page | Browser extension |
+| | AIQuotaBar | Open settings page | Browser extension |
 |---|---|---|---|
 | Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
 | Notifications | ✅ 80% + 95% | ❌ None | ⚠️ Varies |
@@ -111,8 +111,8 @@ CHATGPT
 ## Manual install
 
 ```bash
-git clone https://github.com/yagcioglutoprak/ClaudeUsageBar.git
-cd ClaudeUsageBar
+git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
+cd AIQuotaBar
 pip install -r requirements.txt
 python3 claude_bar.py
 ```
@@ -151,7 +151,7 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 ## Roadmap
 
-- [ ] Homebrew formula (`brew install --cask claude-usage-bar`)
+- [ ] Homebrew formula (`brew install --cask ai-quota-bar`)
 - [ ] Linux system tray support
 - [ ] Windows tray app
 - [ ] Customizable notification thresholds
@@ -166,8 +166,8 @@ PRs welcome. Open an issue first for large changes.
 
 To run in development:
 ```bash
-git clone https://github.com/yagcioglutoprak/ClaudeUsageBar.git
-cd ClaudeUsageBar
+git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
+cd AIQuotaBar
 pip install -r requirements.txt
 python3 claude_bar.py
 ```

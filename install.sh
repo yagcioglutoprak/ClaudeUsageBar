@@ -1,11 +1,11 @@
 #!/bin/bash
 # Claude Usage Bar — one-line installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/ClaudeUsageBar/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 
 set -e
 
-REPO="https://github.com/yagcioglutoprak/ClaudeUsageBar"
-INSTALL_DIR="$HOME/.claude-usage-bar"
+REPO="https://github.com/yagcioglutoprak/AIQuotaBar"
+INSTALL_DIR="$HOME/.ai-quota-bar"
 PLIST="$HOME/Library/LaunchAgents/com.claudebar.plist"
 
 echo ""
