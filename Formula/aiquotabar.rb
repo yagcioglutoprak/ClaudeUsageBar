@@ -63,6 +63,9 @@ class Aiquotabar < Formula
     venv = libexec/"venv"
     system "python3.12", "-m", "venv", venv
 
+    # pyobjc-core tries to read $HOME during build; point it at a writable dir
+    ENV["HOME"] = buildpath
+
     resources.each do |r|
       r.stage do
         system venv/"bin/pip", "install", "--no-deps", "."
