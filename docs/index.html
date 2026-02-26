@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- SEO -->
+  <title>AIQuotaBar - Live Claude &amp; ChatGPT Usage in Your macOS Menu Bar</title>
+  <meta name="description" content="See your Claude.ai and ChatGPT usage limits live in your macOS menu bar. Zero setup, reads cookies automatically. One command to install.">
+  <meta name="keywords" content="claude usage monitor macos, chatgpt usage menu bar, claude rate limit tracker, claude ai usage, anthropic rate limit, macos menu bar app, claude pro usage, chatgpt rate limit, ai quota tracker">
+  <meta name="author" content="Toprak Yagcioglu">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="AIQuotaBar - Live Claude &amp; ChatGPT Usage in Your macOS Menu Bar">
+  <meta property="og:description" content="Never get blindsided by your Claude limit again. See usage live in your menu bar. One command to install.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/assets/demo.gif">
+  <meta property="og:url" content="https://yagcioglutoprak.github.io/AIQuotaBar/">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="AIQuotaBar - Live Claude &amp; ChatGPT Usage in Your macOS Menu Bar">
+  <meta name="twitter:description" content="Never get blindsided by your Claude limit again. See usage live in your menu bar.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/assets/demo.gif">
+
+  <link rel="canonical" href="https://yagcioglutoprak.github.io/AIQuotaBar/">
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <style>
+    /* ── Reset & Base ────────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg:        #0a0a0b;
+      --bg-raised: #111113;
+      --bg-card:   #16161a;
+      --border:    #222228;
+      --text:      #ededef;
+      --text-dim:  #8b8b8e;
+      --accent:    #7c5cfc;
+      --accent-hover: #9278ff;
+      --green:     #34d399;
+      --yellow:    #fbbf24;
+      --red:       #f87171;
+      --mono:      'JetBrains Mono', ui-monospace, monospace;
+      --sans:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --max-w:     1080px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; transition: color 0.15s; }
+    a:hover { color: var(--accent-hover); }
+
+    /* ── Layout ──────────────────────────────────────────────────── */
+    .container {
+      max-width: var(--max-w);
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    section { padding: 80px 0; }
+
+    /* ── Nav ─────────────────────────────────────────────────────── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(10, 10, 11, 0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+    }
+
+    .nav-brand {
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text);
+      letter-spacing: -0.02em;
+    }
+
+    .nav-links { display: flex; align-items: center; gap: 24px; }
+    .nav-links a { color: var(--text-dim); font-size: 14px; font-weight: 500; }
+    .nav-links a:hover { color: var(--text); }
+
+    .gh-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .gh-btn:hover { border-color: #444; background: var(--bg-raised); color: var(--text); }
+
+    .gh-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+    /* ── Hero ────────────────────────────────────────────────────── */
+    .hero {
+      padding-top: 160px;
+      padding-bottom: 80px;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      padding: 4px 14px;
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-dim);
+      margin-bottom: 24px;
+      letter-spacing: 0.01em;
+    }
+
+    .hero h1 {
+      font-size: clamp(32px, 5vw, 56px);
+      font-weight: 700;
+      line-height: 1.1;
+      letter-spacing: -0.035em;
+      max-width: 720px;
+      margin: 0 auto 20px;
+    }
+
+    .hero p {
+      font-size: 18px;
+      color: var(--text-dim);
+      max-width: 540px;
+      margin: 0 auto 40px;
+      line-height: 1.5;
+    }
+
+    /* ── Code block (install command) ────────────────────────────── */
+    .code-block {
+      position: relative;
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 56px 16px 20px;
+      max-width: 640px;
+      margin: 0 auto;
+      text-align: left;
+      overflow-x: auto;
+    }
+
+    .code-block code {
+      font-family: var(--mono);
+      font-size: 14px;
+      color: var(--green);
+      white-space: nowrap;
+    }
+
+    .copy-btn {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      cursor: pointer;
+      color: var(--text-dim);
+      transition: color 0.15s, border-color 0.15s;
+      display: flex;
+      align-items: center;
+    }
+    .copy-btn:hover { color: var(--text); border-color: #444; }
+    .copy-btn svg { width: 16px; height: 16px; }
+
+    /* ── Demo ────────────────────────────────────────────────────── */
+    .demo {
+      text-align: center;
+      padding-top: 0;
+    }
+
+    .demo-img-wrapper {
+      position: relative;
+      max-width: 720px;
+      margin: 0 auto;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      background: var(--bg-raised);
+      box-shadow: 0 0 80px rgba(124, 92, 252, 0.06);
+    }
+
+    .demo-img-wrapper img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    /* ── Features ────────────────────────────────────────────────── */
+    .features { text-align: center; }
+
+    .features h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .features > .container > p {
+      color: var(--text-dim);
+      font-size: 16px;
+      margin-bottom: 48px;
+    }
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 24px;
+      text-align: left;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .feature-card:hover { border-color: #333; transform: translateY(-2px); }
+
+    .feature-icon {
+      font-size: 28px;
+      margin-bottom: 16px;
+      display: block;
+    }
+
+    .feature-card h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 14px;
+      color: var(--text-dim);
+      line-height: 1.55;
+    }
+
+    /* ── Preview ─────────────────────────────────────────────────── */
+    .preview { text-align: center; }
+
+    .preview h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .preview > .container > p {
+      color: var(--text-dim);
+      font-size: 16px;
+      margin-bottom: 40px;
+    }
+
+    .preview-box {
+      background: var(--bg-raised);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 36px;
+      max-width: 440px;
+      margin: 0 auto;
+      text-align: left;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .preview-box .section-label {
+      font-weight: 600;
+      color: var(--text-dim);
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-top: 20px;
+      margin-bottom: 8px;
+    }
+    .preview-box .section-label:first-child { margin-top: 0; }
+
+    .preview-box .row { color: var(--text); margin-bottom: 2px; }
+    .preview-box .bar {
+      color: var(--text-dim);
+      margin-bottom: 2px;
+    }
+    .preview-box .sub {
+      color: var(--text-dim);
+      font-size: 12px;
+      margin-bottom: 12px;
+    }
+
+    .c-green  { color: var(--green); }
+    .c-yellow { color: var(--yellow); }
+
+    /* ── Install ─────────────────────────────────────────────────── */
+    .install { text-align: center; }
+
+    .install h2 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .install > .container > p {
+      color: var(--text-dim);
+      font-size: 16px;
+      margin-bottom: 48px;
+    }
+
+    .install-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 20px;
+      max-width: 720px;
+      margin: 0 auto;
+    }
+
+    .install-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 28px 24px;
+      text-align: left;
+    }
+
+    .install-card h3 {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .install-card .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--green);
+      background: rgba(52, 211, 153, 0.1);
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-bottom: 16px;
+    }
+
+    .install-card pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.6;
+    }
+
+    /* ── CTA ─────────────────────────────────────────────────────── */
+    .cta {
+      text-align: center;
+      padding: 100px 0 120px;
+    }
+
+    .cta h2 {
+      font-size: clamp(24px, 4vw, 36px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 16px;
+    }
+
+    .cta p {
+      color: var(--text-dim);
+      font-size: 16px;
+      margin-bottom: 32px;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--accent);
+      color: #fff;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      transition: background 0.15s, transform 0.1s;
+    }
+    .btn-primary:hover { background: var(--accent-hover); color: #fff; transform: translateY(-1px); }
+    .btn-primary svg { width: 18px; height: 18px; fill: currentColor; }
+
+    /* ── Footer ──────────────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      text-align: center;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    footer a { color: var(--text-dim); }
+    footer a:hover { color: var(--text); }
+
+    /* ── Responsive ──────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      section { padding: 60px 0; }
+      .hero { padding-top: 120px; padding-bottom: 60px; }
+
+      .features-grid { grid-template-columns: 1fr; gap: 16px; }
+      .install-grid  { grid-template-columns: 1fr; gap: 16px; }
+
+      .nav-links a:not(.gh-btn) { display: none; }
+
+      .code-block { padding: 14px 48px 14px 16px; }
+      .code-block code { font-size: 12px; }
+
+      .preview-box { padding: 24px 20px; font-size: 12px; }
+
+      .cta { padding: 60px 0 80px; }
+    }
+
+    @media (max-width: 480px) {
+      .hero h1 { font-size: 28px; }
+      .hero p { font-size: 16px; }
+      .code-block code { font-size: 11px; }
+    }
+
+    /* ── Subtle glow behind hero ─────────────────────────────────── */
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 400px;
+      background: radial-gradient(ellipse, rgba(124, 92, 252, 0.08) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    .hero { position: relative; }
+
+    /* ── Divider ─────────────────────────────────────────────────── */
+    .divider {
+      width: 48px;
+      height: 1px;
+      background: var(--border);
+      margin: 0 auto 48px;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="container">
+      <span class="nav-brand">AIQuotaBar</span>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/yagcioglutoprak/AIQuotaBar" class="gh-btn" target="_blank" rel="noopener">
+          <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <span class="hero-badge">macOS menu bar app</span>
+      <h1>Never get blindsided by your Claude limit again</h1>
+      <p>See your Claude.ai and ChatGPT usage limits live in your menu bar. Zero setup. One command.</p>
+      <div class="code-block" id="install-cmd">
+        <code>curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash</code>
+        <button class="copy-btn" onclick="copyInstall()" aria-label="Copy install command">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Demo -->
+  <section class="demo">
+    <div class="container">
+      <div class="demo-img-wrapper">
+        <img
+          src="https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/assets/demo.gif"
+          alt="AIQuotaBar demo showing live Claude and ChatGPT usage in the macOS menu bar"
+          loading="lazy"
+          width="720"
+          height="450"
+        >
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <div class="container">
+      <h2>Built for developers who hit limits</h2>
+      <p>No Electron. No browser extension. Just a tiny Python script in your menu bar.</p>
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F50D;</span>
+          <h3>Zero setup</h3>
+          <p>Reads cookies directly from Chrome, Arc, Firefox, Brave, Edge, or Safari. No copy-pasting tokens. No API keys for Claude.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F4CA;</span>
+          <h3>Claude + ChatGPT</h3>
+          <p>Tracks Claude.ai session limits, weekly limits, and ChatGPT usage quotas in one place. Add OpenAI API spending too.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#xF8FF;</span>
+          <h3>macOS native</h3>
+          <p>~900 lines of Python. Runs as a LaunchAgent. Starts at login. Tiny memory footprint. No background services.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Preview -->
+  <section class="preview" id="preview">
+    <div class="container">
+      <h2>What it looks like</h2>
+      <p>Always visible in your menu bar. Click to see the full breakdown.</p>
+      <div class="preview-box">
+        <div class="section-label">Claude</div>
+        <div class="row"><span class="c-green">&#x1F7E2;</span> Current Session</div>
+        <div class="bar"><span class="c-green">&#x2588;&#x2588;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;</span> 12%</div>
+        <div class="sub">resets in 3h 41m</div>
+
+        <div class="row"><span class="c-yellow">&#x1F7E1;</span> All Models</div>
+        <div class="bar"><span class="c-yellow">&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2588;&#x2591;&#x2591;</span> 83%</div>
+        <div class="sub">resets Wed 23:00</div>
+
+        <div class="row"><span class="c-green">&#x1F7E2;</span> Sonnet Only</div>
+        <div class="bar"><span class="c-green">&#x2588;&#x2588;&#x2588;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;</span> 22%</div>
+        <div class="sub">resets Wed 23:00</div>
+
+        <div class="section-label">ChatGPT</div>
+        <div class="row"><span class="c-green">&#x1F7E2;</span> Codex Tasks</div>
+        <div class="bar"><span class="c-green">&#x2588;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;&#x2591;</span> 0%</div>
+        <div class="sub">resets Thu 05:38</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Install -->
+  <section class="install" id="install">
+    <div class="container">
+      <h2>Get started in seconds</h2>
+      <p>Two ways to install. Both take under a minute.</p>
+      <div class="install-grid">
+        <div class="install-card">
+          <h3>One-liner</h3>
+          <span class="tag">Recommended</span>
+          <pre>curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash</pre>
+        </div>
+        <div class="install-card">
+          <h3>Homebrew</h3>
+          <span class="tag">Tap</span>
+          <pre>brew tap yagcioglutoprak/aiquotabar
+brew install --HEAD aiquotabar
+aiquotabar &amp;</pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="container">
+      <h2>Open source. MIT licensed. Star it on GitHub.</h2>
+      <p>Featured on Hacker News (161 points) and Product Hunt (382 upvotes).</p>
+      <a href="https://github.com/yagcioglutoprak/AIQuotaBar" class="btn-primary" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>AIQuotaBar &mdash; <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" rel="noopener">GitHub</a> &middot; MIT License &middot; Not affiliated with Anthropic or OpenAI</p>
+    </div>
+  </footer>
+
+  <script>
+    function copyInstall() {
+      var cmd = 'curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash';
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(function() { showCopied(); });
+      } else {
+        var ta = document.createElement('textarea');
+        ta.value = cmd;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        showCopied();
+      }
+    }
+
+    function showCopied() {
+      var btn = document.querySelector('.copy-btn');
+      var orig = btn.innerHTML;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      btn.style.color = '#34d399';
+      setTimeout(function() {
+        btn.innerHTML = orig;
+        btn.style.color = '';
+      }, 2000);
+    }
+  </script>
+
+</body>
+</html>
