@@ -24,6 +24,12 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+try:
+    import browser_cookie3
+    _BROWSER_COOKIE3_OK = True
+except ImportError:
+    _BROWSER_COOKIE3_OK = False
+
 # ── logging ──────────────────────────────────────────────────────────────────
 
 LOG_FILE = os.path.expanduser("~/.claude_bar.log")
@@ -363,6 +369,39 @@ def _clipboard_text() -> str:
         return ""
 
 
+def _auto_detect_cookies() -> str | None:
+    """Try to read claude.ai cookies from installed browsers."""
+    if not _BROWSER_COOKIE3_OK:
+        return None
+
+    browsers = [
+        ("Chrome",  browser_cookie3.chrome),
+        ("Brave",   browser_cookie3.brave),
+        ("Firefox", browser_cookie3.firefox),
+        ("Safari",  browser_cookie3.safari),
+    ]
+    for name, loader in browsers:
+        try:
+            jar = loader(domain_name="claude.ai")
+            cookies = {c.name: c.value for c in jar}
+            if "sessionKey" in cookies:
+                cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+                log.info("Auto-detected cookies from %s (%d keys)", name, len(cookies))
+                return cookie_str
+        except Exception as e:
+            log.debug("browser_cookie3 %s failed: %s", name, e)
+    return None
+
+
+def _notify(title: str, subtitle: str, message: str = ""):
+    """rumps.notification wrapper — silently swallows if the notification
+    center is unavailable (e.g. missing Info.plist in dev environments)."""
+    try:
+        rumps.notification(title, subtitle, message)
+    except Exception as e:
+        log.debug("notification suppressed: %s", e)
+
+
 def _show_text(title: str, text: str):
     try:
         tmp = tempfile.NamedTemporaryFile(
@@ -397,6 +436,9 @@ class ClaudeBar(rumps.App):
 
         if self.config.get("cookie_str"):
             self._schedule_fetch()
+        else:
+            # Try to auto-detect cookies from the browser on first run
+            threading.Thread(target=self._try_auto_detect, daemon=True).start()
 
     # ── menu ─────────────────────────────────────────────────────────────────
 
@@ -457,6 +499,7 @@ class ClaudeBar(rumps.App):
         items.append(interval_menu)
 
         items.append(None)
+        items.append(rumps.MenuItem("Auto-detect from Browser", callback=self._auto_detect_menu))
         items.append(rumps.MenuItem("Set Session Cookie…", callback=self._set_cookie))
         items.append(rumps.MenuItem("Paste Cookie from Clipboard", callback=self._paste_cookie))
         items.append(rumps.MenuItem("Show Raw API Data…", callback=self._show_raw))
@@ -510,13 +553,21 @@ class ClaudeBar(rumps.App):
                 self._auth_fail_count += 1
                 self.title = "◆ !"
                 if self._auth_fail_count >= 2:
-                    # Auto-prompt after 2 consecutive auth failures
-                    rumps.notification(
-                        "Claude Usage Bar",
-                        "Session expired — please update your cookie",
-                        "Click: Set Session Cookie…",
-                    )
                     self._auth_fail_count = 0
+                    # Try auto-detect first before prompting the user
+                    cookie_str = _auto_detect_cookies()
+                    if cookie_str:
+                        self.config["cookie_str"] = cookie_str
+                        save_config(self.config)
+                        self._warned_pcts.clear()
+                        log.info("Auth failed — auto-detected fresh cookies from browser")
+                        self._schedule_fetch()
+                    else:
+                        _notify(
+                            "Claude Usage Bar",
+                            "Session expired — please update your cookie",
+                            "Click: Set Session Cookie… or Auto-detect from Browser",
+                        )
             else:
                 self.title = "◆ err"
         except Exception:
@@ -539,14 +590,14 @@ class ClaudeBar(rumps.App):
             crit_key = f"{key}_{CRIT_THRESHOLD}"
             if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
                 self._warned_pcts.add(crit_key)
-                rumps.notification(
+                _notify(
                     "Claude Usage Bar 🔴",
                     f"{row.label} is at {row.pct}%!",
                     row.reset_str or "Limit almost reached",
                 )
             elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
                 self._warned_pcts.add(warn_key)
-                rumps.notification(
+                _notify(
                     "Claude Usage Bar 🟡",
                     f"{row.label} is at {row.pct}%",
                     row.reset_str or "Approaching limit",
@@ -608,7 +659,7 @@ class ClaudeBar(rumps.App):
     def _paste_cookie(self, _sender):
         text = _clipboard_text()
         if not text or ("sessionKey" not in text and "=" not in text):
-            rumps.notification(
+            _notify(
                 "Claude Usage Bar",
                 "Nothing useful in clipboard",
                 "Copy your cookie string from Chrome DevTools first.",
@@ -619,7 +670,7 @@ class ClaudeBar(rumps.App):
         self._warned_pcts.clear()
         self._auth_fail_count = 0
         self._schedule_fetch()
-        rumps.notification(
+        _notify(
             "Claude Usage Bar",
             "Cookie updated from clipboard ✓",
             "Fetching usage data…",
@@ -632,11 +683,52 @@ class ClaudeBar(rumps.App):
     def _toggle_login_item(self, _sender):
         if _is_login_item():
             _remove_login_item()
-            rumps.notification("Claude Usage Bar", "Removed from Login Items", "")
+            _notify("Claude Usage Bar", "Removed from Login Items", "")
         else:
             _add_login_item()
-            rumps.notification("Claude Usage Bar", "Added to Login Items ✓", "Will launch automatically on login")
+            _notify("Claude Usage Bar", "Added to Login Items ✓", "Will launch automatically on login")
         self._rebuild_menu(self._last_data)
+
+    def _try_auto_detect(self):
+        """Background: silently try to grab cookies from the browser on first run."""
+        cookie_str = _auto_detect_cookies()
+        if cookie_str:
+            self.config["cookie_str"] = cookie_str
+            save_config(self.config)
+            _notify(
+                "Claude Usage Bar",
+                "Cookies auto-detected from your browser ✓",
+                "Fetching usage data…",
+            )
+            self._schedule_fetch()
+
+    def _auto_detect_menu(self, _sender):
+        """Menu item: manually trigger auto-detect."""
+        if not _BROWSER_COOKIE3_OK:
+            _notify(
+                "Claude Usage Bar",
+                "browser-cookie3 not installed",
+                "Run: pip install browser-cookie3",
+            )
+            return
+        cookie_str = _auto_detect_cookies()
+        if cookie_str:
+            self.config["cookie_str"] = cookie_str
+            save_config(self.config)
+            self._warned_pcts.clear()
+            self._auth_fail_count = 0
+            _notify(
+                "Claude Usage Bar",
+                "Cookies auto-detected ✓",
+                "Fetching usage data…",
+            )
+            self._schedule_fetch()
+        else:
+            _notify(
+                "Claude Usage Bar",
+                "Could not find claude.ai session in any browser",
+                "Make sure you are logged in to claude.ai in Chrome, Firefox, or Safari.",
+            )
 
 
 if __name__ == "__main__":
