@@ -14,6 +14,8 @@ No Electron. No browser extension. One command to install.
 [![Latest Release](https://img.shields.io/github/v/release/yagcioglutoprak/ClaudeUsageBar)](https://github.com/yagcioglutoprak/ClaudeUsageBar/releases/latest)
 [![Last Commit](https://img.shields.io/github/last-commit/yagcioglutoprak/ClaudeUsageBar)](https://github.com/yagcioglutoprak/ClaudeUsageBar/commits/main)
 
+**Featured on [Hacker News](https://news.ycombinator.com/item?id=46544524) (161 points, 49 comments) · [Product Hunt](https://www.producthunt.com/products/claudeusagebar) (382 upvotes)**
+
 ---
 
 ## Why I built this
