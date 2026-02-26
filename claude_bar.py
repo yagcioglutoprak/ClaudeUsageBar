@@ -222,7 +222,9 @@ def _row(data: dict, key: str, label: str) -> LimitRow | None:
     bucket = data.get(key)
     if not bucket or not isinstance(bucket, dict):
         return None
-    pct = min(100, round(float(bucket.get("utilization", 0)) * 100))
+    raw = float(bucket.get("utilization", 0))
+    # API is inconsistent: five_hour returns 0-1 fraction, weekly returns 0-100 percentage
+    pct = min(100, round(raw if raw > 1.0 else raw * 100))
     reset = _fmt_reset(bucket.get("resets_at"))
     return LimitRow(label, pct, reset)
 
