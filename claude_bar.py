@@ -369,18 +369,72 @@ def _clipboard_text() -> str:
         return ""
 
 
+_BUNDLE_TO_BROWSER = {
+    "com.google.chrome":           ("Chrome",   lambda: browser_cookie3.chrome),
+    "org.chromium.chromium":       ("Chromium", lambda: browser_cookie3.chromium),
+    "company.thebrowser.browser":  ("Arc",      lambda: browser_cookie3.arc),
+    "com.brave.browser":           ("Brave",    lambda: browser_cookie3.brave),
+    "com.microsoft.edgemac":       ("Edge",     lambda: browser_cookie3.edge),
+    "org.mozilla.firefox":         ("Firefox",  lambda: browser_cookie3.firefox),
+    "com.apple.safari":            ("Safari",   lambda: browser_cookie3.safari),
+    "com.operasoftware.opera":     ("Opera",    lambda: browser_cookie3.opera),
+    "com.vivaldi.vivaldi":         ("Vivaldi",  lambda: browser_cookie3.vivaldi),
+}
+
+_ALL_BROWSERS = [
+    ("Chrome",   lambda: browser_cookie3.chrome),
+    ("Arc",      lambda: browser_cookie3.arc),
+    ("Brave",    lambda: browser_cookie3.brave),
+    ("Edge",     lambda: browser_cookie3.edge),
+    ("Firefox",  lambda: browser_cookie3.firefox),
+    ("Safari",   lambda: browser_cookie3.safari),
+    ("Chromium", lambda: browser_cookie3.chromium),
+    ("Opera",    lambda: browser_cookie3.opera),
+    ("Vivaldi",  lambda: browser_cookie3.vivaldi),
+]
+
+
+def _default_browser_entry() -> tuple[str, object] | None:
+    """Return (name, loader) for the macOS default browser, or None."""
+    try:
+        r = subprocess.run(
+            ["defaults", "read",
+             "com.apple.LaunchServices/com.apple.launchservices.secure",
+             "LSHandlers"],
+            capture_output=True, text=True, timeout=5,
+        )
+        text = r.stdout
+        for block in text.split("{"):
+            if "LSHandlerURLScheme = https" in block and "LSHandlerRoleAll" in block:
+                for line in block.splitlines():
+                    line = line.strip()
+                    if line.startswith("LSHandlerRoleAll"):
+                        bundle = line.split("=")[-1].strip().strip('";')
+                        entry = _BUNDLE_TO_BROWSER.get(bundle)
+                        if entry:
+                            name, loader_fn = entry
+                            return name, loader_fn()
+    except Exception as e:
+        log.debug("_default_browser_entry failed: %s", e)
+    return None
+
+
 def _auto_detect_cookies() -> str | None:
-    """Try to read claude.ai cookies from installed browsers."""
+    """Try to read claude.ai cookies — default browser first, then all others."""
     if not _BROWSER_COOKIE3_OK:
         return None
 
-    browsers = [
-        ("Chrome",  browser_cookie3.chrome),
-        ("Brave",   browser_cookie3.brave),
-        ("Firefox", browser_cookie3.firefox),
-        ("Safari",  browser_cookie3.safari),
-    ]
-    for name, loader in browsers:
+    # Build ordered list: default browser first, then the rest
+    default = _default_browser_entry()
+    if default:
+        default_name, default_loader = default
+        ordered = [(default_name, default_loader)] + [
+            (n, lf()) for n, lf in _ALL_BROWSERS if n != default_name
+        ]
+    else:
+        ordered = [(n, lf()) for n, lf in _ALL_BROWSERS]
+
+    for name, loader in ordered:
         try:
             jar = loader(domain_name="claude.ai")
             cookies = {c.name: c.value for c in jar}
