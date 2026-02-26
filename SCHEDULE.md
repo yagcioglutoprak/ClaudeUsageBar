@@ -13,6 +13,9 @@
 | 2026-02-26 | r/ClaudeAI | ❌ Rejected | Repost with fixed version below (wait 1h) |
 | 2026-02-26 | awesome-mac PR #1833 | 🔄 Open | Waiting on FOSSA license scan + maintainer |
 | 2026-02-26 | open-source-mac-os-apps PR #1041 | 🔄 Open | Waiting on maintainer workflow approval |
+| 2026-02-26 | awesome-claude PR #60 | 🔄 Open | tonysurfly/awesome-claude |
+| 2026-02-26 | jqueryscript/awesome-claude-code PR #51 | 🔄 Open | Waiting on maintainer |
+| 2026-02-26 | GitHub Pages | ✅ Live | https://yagcioglutoprak.github.io/AIQuotaBar/ |
 | 2026-02-27 | r/MacApps | ⏳ Pending | |
 | 2026-02-27 | r/ChatGPT | ⏳ Pending | Post a few hours after r/MacApps |
 | 2026-02-28 | awesome-claude-code | ⚠️ Manual only | 2-day cooldown expires — MUST submit via browser (see section below) |
