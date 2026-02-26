@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import logging
+import urllib.parse
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
@@ -577,6 +578,76 @@ def _mi(title: str) -> rumps.MenuItem:
     return item
 
 
+def _colored_mi(title: str, color_hex: str) -> rumps.MenuItem:
+    """Disabled menu item with brand-colored text."""
+    item = rumps.MenuItem(title)
+    item.set_callback(None)
+    try:
+        from AppKit import NSColor, NSForegroundColorAttributeName
+        from Foundation import NSAttributedString
+        r = int(color_hex[1:3], 16) / 255
+        g = int(color_hex[3:5], 16) / 255
+        b = int(color_hex[5:7], 16) / 255
+        color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 0.75)
+        astr = NSAttributedString.alloc().initWithString_attributes_(
+            title, {NSForegroundColorAttributeName: color}
+        )
+        item._menuitem.setAttributedTitle_(astr)
+    except Exception as e:
+        log.debug("_colored_mi: %s", e)
+    return item
+
+
+def _menu_icon(filename: str, tint_hex: str | None = None, size: int = 16):
+    """Load an NSImage for use in a menu item, optionally tinted."""
+    try:
+        from AppKit import NSImage, NSColor
+        path = os.path.join(_ICON_DIR, filename)
+        raw = NSImage.alloc().initWithContentsOfFile_(path)
+        if not raw:
+            return None
+        img = raw.copy()
+        img.setSize_((size, size))
+        if tint_hex:
+            r = int(tint_hex[1:3], 16) / 255
+            g = int(tint_hex[3:5], 16) / 255
+            b = int(tint_hex[5:7], 16) / 255
+            color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
+            img.setTemplate_(True)
+            if hasattr(img, "imageWithTintColor_"):
+                img = img.imageWithTintColor_(color)
+        return img
+    except Exception as e:
+        log.debug("_menu_icon %s: %s", filename, e)
+        return None
+
+
+def _section_header_mi(title: str, icon_filename: str | None,
+                        color_hex: str, icon_tint: str | None = None) -> rumps.MenuItem:
+    """Disabled section header with brand icon and colored bold title."""
+    item = rumps.MenuItem(title)
+    item.set_callback(None)
+    try:
+        from AppKit import (NSColor, NSFont,
+                            NSForegroundColorAttributeName, NSFontAttributeName)
+        from Foundation import NSAttributedString
+        r = int(color_hex[1:3], 16) / 255
+        g = int(color_hex[3:5], 16) / 255
+        b = int(color_hex[5:7], 16) / 255
+        color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
+        font = NSFont.boldSystemFontOfSize_(12)
+        attrs = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
+        astr = NSAttributedString.alloc().initWithString_attributes_(title, attrs)
+        item._menuitem.setAttributedTitle_(astr)
+        if icon_filename:
+            img = _menu_icon(icon_filename, tint_hex=icon_tint)
+            if img:
+                item._menuitem.setImage_(img)
+    except Exception as e:
+        log.debug("_section_header_mi: %s", e)
+    return item
+
+
 # ── login item helpers ────────────────────────────────────────────────────────
 
 def _script_path() -> str:
@@ -814,21 +885,23 @@ class ClaudeBar(rumps.App):
         items: list = []
 
         # ── ◆  CLAUDE section ─────────────────────────────────────────────
-        items.append(_mi("◆  CLAUDE"))
+        items.append(_section_header_mi("  CLAUDE", "claude_icon.png", "#D97757"))
         items.append(None)
 
         if data is None or not any([data.session, data.weekly_all, data.weekly_sonnet]):
             items.append(_mi("  No data — click Auto-detect from Browser"))
         else:
             if data.session:
-                for line in _row_lines(data.session):
-                    items.append(_mi(line))
+                lines = _row_lines(data.session)
+                items.append(_mi(lines[0]))
+                items.append(_colored_mi(lines[1], "#D97757"))
                 items.append(None)
 
             for row in [data.weekly_all, data.weekly_sonnet]:
                 if row:
-                    for line in _row_lines(row):
-                        items.append(_mi(line))
+                    lines = _row_lines(row)
+                    items.append(_mi(lines[0]))
+                    items.append(_colored_mi(lines[1], "#D97757"))
                     items.append(None)
 
             if data.overages_enabled is not None:
@@ -841,17 +914,26 @@ class ClaudeBar(rumps.App):
             (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
         )
         if chatgpt_pd:
-            items.append(_mi("◇  CHATGPT"))
+            items.append(_section_header_mi("  CHATGPT", "chatgpt_icon_clean.png",
+                                            "#74AA9C", icon_tint="#74AA9C"))
             items.append(None)
-            for line in _provider_lines(chatgpt_pd):
-                if line:
-                    items.append(_mi(line))
-            items.append(None)
+            rows = getattr(chatgpt_pd, "_rows", None)
+            if rows:
+                for row in rows:
+                    lines = _row_lines(row)
+                    items.append(_mi(lines[0]))
+                    items.append(_colored_mi(lines[1], "#74AA9C"))
+                    items.append(None)
+            else:
+                for line in _provider_lines(chatgpt_pd):
+                    if line:
+                        items.append(_mi(line))
+                items.append(None)
 
         # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
         if self._cc_stats:
             cc = self._cc_stats
-            items.append(_mi("◆  CLAUDE CODE"))
+            items.append(_section_header_mi("  CLAUDE CODE", "claude_icon.png", "#D97757"))
             items.append(None)
             if cc["today_messages"] > 0:
                 items.append(_mi(
@@ -889,6 +971,7 @@ class ClaudeBar(rumps.App):
         # ── Actions ──────────────────────────────────────────────────────
         items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))
         items.append(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._open_usage_page))
+        items.append(rumps.MenuItem("Share on X / Twitter…", callback=self._share_on_x))
         items.append(None)
 
         # Refresh interval submenu
@@ -1183,6 +1266,26 @@ class ClaudeBar(rumps.App):
 
     def _open_usage_page(self, _sender):
         subprocess.Popen(["open", "https://claude.ai/settings/usage"])
+
+    def _share_on_x(self, _sender):
+        data = self._last_data
+        if data and data.session:
+            pct = int(data.session.percentage)
+            icon = _status_icon(pct)
+            text = (
+                f"I'm at {pct}% of my Claude session limit {icon}\n"
+                f"Tracking Claude.ai + ChatGPT usage live in my macOS menu bar "
+                f"— zero setup, auto-detects from browser\n"
+                f"github.com/yagcioglutoprak/AIQuotaBar"
+            )
+        else:
+            text = (
+                "Track Claude.ai + ChatGPT usage live in your macOS menu bar "
+                "— zero setup, auto-detects from browser\n"
+                "github.com/yagcioglutoprak/AIQuotaBar"
+            )
+        url = "https://x.com/intent/post?text=" + urllib.parse.quote(text)
+        subprocess.Popen(["open", url])
 
     def _make_provider_key_cb(self, cfg_key: str, name: str):
         def _cb(_sender):

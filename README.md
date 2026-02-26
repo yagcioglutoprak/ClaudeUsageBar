@@ -26,11 +26,19 @@ I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai do
 
 ## Install
 
+**One-line (recommended):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 ```
 
-That's it. The app launches immediately and auto-detects your Claude session from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
+**Homebrew:**
+```bash
+brew tap yagcioglutoprak/aiquotabar
+brew install --HEAD aiquotabar
+aiquotabar &
+```
+
+The app launches immediately and auto-detects your Claude session from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
 
 ---
 
@@ -151,7 +159,7 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 ## Roadmap
 
-- [ ] Homebrew formula (`brew install --cask ai-quota-bar`)
+- [x] Homebrew tap (`brew tap yagcioglutoprak/aiquotabar && brew install --HEAD aiquotabar`)
 - [ ] Linux system tray support
 - [ ] Windows tray app
 - [ ] Customizable notification thresholds
