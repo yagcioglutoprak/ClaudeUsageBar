@@ -188,7 +188,10 @@ def _fmt_reset(val) -> str:
         if isinstance(val, (int, float)):
             dt = datetime.fromtimestamp(val, tz=timezone.utc)
         else:
-            dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+            s = str(val).rstrip("Z")
+            if "+" not in s[10:] and s[-6] != "+":
+                s += "+00:00"
+            dt = datetime.fromisoformat(s)
         now = datetime.now(timezone.utc)
         delta = dt - now
         secs = delta.total_seconds()
@@ -213,7 +216,7 @@ def _row(data: dict, key: str, label: str) -> LimitRow | None:
     bucket = data.get(key)
     if not bucket or not isinstance(bucket, dict):
         return None
-    pct = min(100, round(float(bucket.get("utilization", 0))))
+    pct = min(100, round(float(bucket.get("utilization", 0)) * 100))
     reset = _fmt_reset(bucket.get("resets_at"))
     return LimitRow(label, pct, reset)
 
