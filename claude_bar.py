@@ -1004,34 +1004,38 @@ class ClaudeBar(rumps.App):
                        cc_msgs: int | None = None):
         """Multi-indicator attributed title: ● 31%  ◇ 0%  ◆ 3.2k
 
-        Uses NSAttributedString so each indicator uses the correct
-        macOS system color. Falls back to plain emoji text if AppKit fails.
+        Brand colors:
+          Claude / Claude Code  #D97757  coral (Anthropic brand)
+          ChatGPT               #74AA9C  teal  (OpenAI brand)
+        Falls back to plain emoji text if AppKit is unavailable.
         """
         try:
             from AppKit import (NSColor, NSFont,
                                 NSForegroundColorAttributeName, NSFontAttributeName)
             from Foundation import NSMutableAttributedString
 
-            def _sys_color(p: int):
-                if p >= CRIT_THRESHOLD:  return NSColor.systemRedColor()
-                if p >= WARN_THRESHOLD:  return NSColor.systemOrangeColor()
-                return NSColor.systemGreenColor()
+            def _rgb(r, g, b):
+                return NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
+
+            # Brand colors
+            CLAUDE_COLOR  = _rgb(217/255, 119/255,  87/255)  # #D97757 Anthropic coral
+            CHATGPT_COLOR = _rgb(116/255, 170/255, 156/255)  # #74AA9C OpenAI teal
 
             font = NSFont.menuBarFontOfSize_(0)
             base = {NSFontAttributeName: font} if font else {}
 
-            # Build list of (text, color|None) segments
+            # (text, color | None)
             segs: list[tuple[str, object]] = []
-            segs.append(("● ",              _sys_color(pct)))
-            segs.append((f"{pct}%{extra}",  None))
+            segs.append(("● ",             CLAUDE_COLOR))
+            segs.append((f"{pct}%{extra}", None))
 
             if chatgpt_pct is not None:
-                segs.append(("  ◇ ",                    None))
-                segs.append((f"{chatgpt_pct}%",  _sys_color(chatgpt_pct)))
+                segs.append(("  ◇ ",           CHATGPT_COLOR))
+                segs.append((f"{chatgpt_pct}%", None))
 
             if cc_msgs is not None and cc_msgs > 0:
-                segs.append(("  ◆ ",              None))
-                segs.append((_fmt_count(cc_msgs),  NSColor.systemBlueColor()))
+                segs.append(("  ◆ ",              CLAUDE_COLOR))
+                segs.append((_fmt_count(cc_msgs),  None))
 
             full = "".join(t for t, _ in segs)
             s = NSMutableAttributedString.alloc().initWithString_attributes_(full, base)
