@@ -427,6 +427,58 @@ def parse_usage(raw: dict) -> UsageData:
     )
 
 
+# ── Brand icon helpers ────────────────────────────────────────────────────────
+
+_ICON_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+_ICON_SIZE  = 14   # points — matches menu bar font height
+_icon_cache: dict = {}
+
+
+def _bar_icon(filename: str, tint_hex: str | None = None):
+    """Lazy-load and cache a menu bar icon (14×14 pt NSImage).
+
+    tint_hex: e.g. '#74AA9C' — applied to monochrome (black) icons so they
+              show in the brand color. Pass None for already-coloured icons.
+    """
+    key = (filename, tint_hex)
+    if key in _icon_cache:
+        return _icon_cache[key]
+    img = None
+    try:
+        from AppKit import NSImage, NSColor
+        path = os.path.join(_ICON_DIR, filename)
+        raw = NSImage.alloc().initWithContentsOfFile_(path)
+        if raw:
+            img = raw.copy()
+            img.setSize_((_ICON_SIZE, _ICON_SIZE))
+            if tint_hex:
+                r = int(tint_hex[1:3], 16) / 255
+                g = int(tint_hex[3:5], 16) / 255
+                b = int(tint_hex[5:7], 16) / 255
+                color = NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
+                img.setTemplate_(True)
+                if hasattr(img, "imageWithTintColor_"):
+                    img = img.imageWithTintColor_(color)
+    except Exception as e:
+        log.debug("_bar_icon %s: %s", filename, e)
+    _icon_cache[key] = img
+    return img
+
+
+def _icon_astr(img, base_attrs: dict):
+    """Wrap an NSImage in an NSAttributedString via NSTextAttachment."""
+    from AppKit import NSTextAttachment, NSAttributedString
+    from Foundation import NSMakeRect, NSMutableAttributedString
+    att = NSTextAttachment.alloc().init()
+    att.setImage_(img)
+    att.setBounds_(NSMakeRect(0, -3, _ICON_SIZE, _ICON_SIZE))
+    astr = NSAttributedString.attributedStringWithAttachment_(att)
+    m = NSMutableAttributedString.alloc().initWithAttributedString_(astr)
+    for k, v in base_attrs.items():
+        m.addAttribute_value_range_(k, v, (0, m.length()))
+    return m
+
+
 # ── Claude Code local stats ───────────────────────────────────────────────────
 
 CC_STATS_FILE = os.path.expanduser("~/.claude/stats-cache.json")
@@ -1002,50 +1054,66 @@ class ClaudeBar(rumps.App):
     def _set_bar_title(self, pct: int, extra: str = "",
                        chatgpt_pct: int | None = None,
                        cc_msgs: int | None = None):
-        """Multi-indicator attributed title: ● 31%  ◇ 0%  ◆ 3.2k
+        """Multi-indicator attributed title with brand logo icons.
 
-        Brand colors:
-          Claude / Claude Code  #D97757  coral (Anthropic brand)
-          ChatGPT               #74AA9C  teal  (OpenAI brand)
-        Falls back to plain emoji text if AppKit is unavailable.
+        [Claude icon] 36%  [ChatGPT icon] 0%  ◆ 3.2k
+
+        Falls back to colored text symbols if AppKit / icons unavailable.
         """
         try:
             from AppKit import (NSColor, NSFont,
                                 NSForegroundColorAttributeName, NSFontAttributeName)
-            from Foundation import NSMutableAttributedString
+            from Foundation import NSMutableAttributedString, NSAttributedString
 
-            def _rgb(r, g, b):
+            def _rgb(hex_str):
+                r = int(hex_str[1:3], 16) / 255
+                g = int(hex_str[3:5], 16) / 255
+                b = int(hex_str[5:7], 16) / 255
                 return NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
 
-            # Brand colors
-            CLAUDE_COLOR  = _rgb(217/255, 119/255,  87/255)  # #D97757 Anthropic coral
-            CHATGPT_COLOR = _rgb(116/255, 170/255, 156/255)  # #74AA9C OpenAI teal
+            CLAUDE_COLOR  = _rgb("#D97757")
+            CHATGPT_COLOR = _rgb("#74AA9C")
 
             font = NSFont.menuBarFontOfSize_(0)
             base = {NSFontAttributeName: font} if font else {}
 
-            # (text, color | None)
-            segs: list[tuple[str, object]] = []
-            segs.append(("● ",             CLAUDE_COLOR))
-            segs.append((f"{pct}%{extra}", None))
+            s = NSMutableAttributedString.alloc().initWithString_("",)
 
+            # ── Claude.ai  [icon] 36% ───────────────────────
+            claude_img = _bar_icon("claude_icon.png")
+            if claude_img:
+                s.appendAttributedString_(_icon_astr(claude_img, base))
+            else:
+                seg = NSMutableAttributedString.alloc().initWithString_attributes_("● ", base)
+                seg.addAttribute_value_range_(NSForegroundColorAttributeName, CLAUDE_COLOR, (0, 2))
+                s.appendAttributedString_(seg)
+            s.appendAttributedString_(
+                NSAttributedString.alloc().initWithString_attributes_(f" {pct}%{extra}", base)
+            )
+
+            # ── ChatGPT  [icon] 0% ──────────────────────────
             if chatgpt_pct is not None:
-                segs.append(("  ◇ ",           CHATGPT_COLOR))
-                segs.append((f"{chatgpt_pct}%", None))
+                s.appendAttributedString_(
+                    NSAttributedString.alloc().initWithString_attributes_("   ", base)
+                )
+                chatgpt_img = _bar_icon("chatgpt_icon_clean.png", tint_hex="#74AA9C")
+                if chatgpt_img:
+                    s.appendAttributedString_(_icon_astr(chatgpt_img, base))
+                else:
+                    seg = NSMutableAttributedString.alloc().initWithString_attributes_("◇ ", base)
+                    seg.addAttribute_value_range_(NSForegroundColorAttributeName, CHATGPT_COLOR, (0, 2))
+                    s.appendAttributedString_(seg)
+                s.appendAttributedString_(
+                    NSAttributedString.alloc().initWithString_attributes_(f" {chatgpt_pct}%", base)
+                )
 
+            # ── Claude Code  ◆ 3.2k ────────────────────────
             if cc_msgs is not None and cc_msgs > 0:
-                segs.append(("  ◆ ",              CLAUDE_COLOR))
-                segs.append((_fmt_count(cc_msgs),  None))
-
-            full = "".join(t for t, _ in segs)
-            s = NSMutableAttributedString.alloc().initWithString_attributes_(full, base)
-            pos = 0
-            for text, color in segs:
-                if color is not None:
-                    s.addAttribute_value_range_(
-                        NSForegroundColorAttributeName, color, (pos, len(text))
-                    )
-                pos += len(text)
+                seg = NSMutableAttributedString.alloc().initWithString_attributes_(
+                    f"   ◆ {_fmt_count(cc_msgs)}", base
+                )
+                seg.addAttribute_value_range_(NSForegroundColorAttributeName, CLAUDE_COLOR, (3, 2))
+                s.appendAttributedString_(seg)
 
             self._nsapp.nsstatusitem.setAttributedTitle_(s)
             return
