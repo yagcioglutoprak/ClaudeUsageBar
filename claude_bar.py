@@ -490,7 +490,7 @@ class ClaudeBar(rumps.App):
             return
 
         # Show loading state
-        current = self.title
+        current = self.title or "◆"
         self.title = current.split(" ")[0] + " …"
 
         try:
