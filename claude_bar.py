@@ -158,6 +158,7 @@ def _org_id_from_api(cookies: dict) -> str | None:
     return None
 
 
+
 def fetch_raw(cookie_str: str) -> dict:
     cookies = parse_cookie_string(cookie_str)
     log.debug("using cookies keys: %s", list(cookies.keys()))
@@ -383,13 +384,15 @@ _BUNDLE_TO_BROWSER = {
     "com.vivaldi.vivaldi":         ("Vivaldi",  lambda: browser_cookie3.vivaldi),
 }
 
+# Firefox/LibreWolf first — no Keychain encryption, zero password prompts.
+# Chromium-based browsers require a one-time Keychain "Always Allow" click.
 _ALL_BROWSERS = [
+    ("Firefox",  lambda: browser_cookie3.firefox),
+    ("LibreWolf",lambda: browser_cookie3.librewolf),
     ("Chrome",   lambda: browser_cookie3.chrome),
     ("Arc",      lambda: browser_cookie3.arc),
     ("Brave",    lambda: browser_cookie3.brave),
     ("Edge",     lambda: browser_cookie3.edge),
-    ("Firefox",  lambda: browser_cookie3.firefox),
-    ("Safari",   lambda: browser_cookie3.safari),
     ("Chromium", lambda: browser_cookie3.chromium),
     ("Opera",    lambda: browser_cookie3.opera),
     ("Vivaldi",  lambda: browser_cookie3.vivaldi),
@@ -421,8 +424,35 @@ def _default_browser_entry() -> tuple[str, object] | None:
     return None
 
 
+_KEYCHAIN_BROWSERS = {"Chrome", "Arc", "Brave", "Edge", "Chromium", "Opera", "Vivaldi"}
+_keychain_warned = False  # show the dialog at most once per session
+
+
+def _warn_keychain_once():
+    """Show a one-time dialog before the macOS Keychain prompt appears."""
+    global _keychain_warned
+    if _keychain_warned:
+        return
+    _keychain_warned = True
+    subprocess.run(
+        ["osascript", "-e",
+         'display dialog "Claude Usage Bar needs one-time access to your '
+         'browser cookies to read your Claude usage.\\n\\n'
+         'macOS will show a security prompt — click \\"Always Allow\\" '
+         'and it will never ask again." '
+         'with title "Claude Usage Bar — One-time Setup" '
+         'buttons {"OK"} default button "OK" '
+         'with icon note'],
+        capture_output=True, timeout=60,
+    )
+
+
 def _auto_detect_cookies() -> str | None:
-    """Try to read claude.ai cookies — default browser first, then all others."""
+    """Try to read claude.ai cookies — default browser first, then all others.
+
+    Firefox/LibreWolf: zero prompts (cookies stored unencrypted).
+    Chromium-based: one-time macOS Keychain 'Always Allow' prompt, then silent.
+    """
     if not _BROWSER_COOKIE3_OK:
         return None
 
@@ -437,6 +467,8 @@ def _auto_detect_cookies() -> str | None:
         ordered = [(n, lf()) for n, lf in _ALL_BROWSERS]
 
     for name, loader in ordered:
+        if name in _KEYCHAIN_BROWSERS:
+            _warn_keychain_once()
         try:
             jar = loader(domain_name="claude.ai")
             cookies = {c.name: c.value for c in jar}
@@ -490,11 +522,8 @@ class ClaudeBar(rumps.App):
         self._timer = rumps.Timer(self._on_timer, self._refresh_interval)
         self._timer.start()
 
-        if self.config.get("cookie_str"):
-            self._schedule_fetch()
-        else:
-            # Try to auto-detect cookies from the browser on first run
-            threading.Thread(target=self._try_auto_detect, daemon=True).start()
+        # Always try to fetch on startup — browser JS works even without saved cookies
+        self._schedule_fetch()
 
     # ── menu ─────────────────────────────────────────────────────────────────
 
@@ -583,17 +612,23 @@ class ClaudeBar(rumps.App):
 
     def _fetch_and_update(self):
         self._fetching = True
-        sk = self.config.get("cookie_str")
-        if not sk:
-            self._fetching = False
-            return
 
         # Show loading state
         current = self.title or "◆"
         self.title = current.split(" ")[0] + " …"
 
         try:
-            raw = fetch_raw(sk)
+            sk = self.config.get("cookie_str")
+            if not sk:
+                sk = _auto_detect_cookies()
+                if sk:
+                    self.config["cookie_str"] = sk
+                    save_config(self.config)
+            if not sk:
+                self.title = "◆"
+                self._fetching = False
+                return
+                raw = fetch_raw(sk)
             self._last_raw = raw
             self._auth_fail_count = 0
             data = parse_usage(raw)
