@@ -203,10 +203,92 @@ def fetch_raw(cookie_str: str) -> dict:
 
 # ── third-party provider APIs ────────────────────────────────────────────────
 
-def _api_get(url: str, headers: dict) -> dict:
-    r = requests.get(url, headers=headers, timeout=10, impersonate="chrome131")
+def _api_get(url: str, headers: dict, cookies: dict | None = None) -> dict:
+    r = requests.get(url, headers=headers, cookies=cookies, timeout=10, impersonate="chrome131")
     r.raise_for_status()
     return r.json()
+
+
+_CHATGPT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+    "Referer": "https://chatgpt.com/codex/settings/usage",
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+}
+
+
+def _chatgpt_access_token(cookies: dict) -> str | None:
+    """Exchange session cookie for a short-lived Bearer token."""
+    data = _api_get("https://chatgpt.com/api/auth/session", _CHATGPT_HEADERS, cookies)
+    return data.get("accessToken")
+
+
+def _parse_wham_window(window: dict, label: str) -> LimitRow | None:
+    """Parse a single rate-limit window dict into a LimitRow."""
+    if not window or not isinstance(window, dict):
+        return None
+    pw = window.get("primary_window") or {}
+    pct = min(100, int(pw.get("used_percent", 0)))
+    reset_str = _fmt_reset(pw.get("reset_at")) if pw.get("reset_at") else ""
+    return LimitRow(label, pct, reset_str)
+
+
+def _parse_wham_usage(data: dict) -> ProviderData:
+    """Parse /backend-api/wham/usage response.
+
+    Confirmed shape (2026-02):
+      rate_limit.primary_window.used_percent  (0-100)
+      rate_limit.primary_window.reset_at      (Unix timestamp)
+      code_review_rate_limit  — same structure
+    """
+    log.debug("wham/usage raw: %s", json.dumps(data, indent=2))
+
+    rows: list[LimitRow] = []
+
+    label_map = {
+        "rate_limit":            "Codex Tasks",
+        "code_review_rate_limit": "Code Review",
+    }
+    for key, label in label_map.items():
+        row = _parse_wham_window(data.get(key), label)
+        if row is not None:
+            rows.append(row)
+
+    # additional_rate_limits may be a list of extra buckets
+    for extra in (data.get("additional_rate_limits") or []):
+        if isinstance(extra, dict):
+            name = extra.get("name") or extra.get("type") or "Extra"
+            row = _parse_wham_window(extra, name.replace("_", " ").title())
+            if row:
+                rows.append(row)
+
+    if not rows:
+        return ProviderData("ChatGPT", error="No rate limit data in response")
+
+    worst = max(rows, key=lambda r: r.pct)
+    pd = ProviderData("ChatGPT", spent=float(worst.pct), limit=100.0, currency="")
+    pd._rows = rows
+    return pd
+
+
+def fetch_chatgpt(cookie_str: str) -> ProviderData:
+    """Fetch ChatGPT / Codex usage via /backend-api/wham/usage."""
+    cookies = parse_cookie_string(cookie_str)
+    try:
+        token = _chatgpt_access_token(cookies)
+        if not token:
+            return ProviderData("ChatGPT", error="Not logged in")
+        h = {**_CHATGPT_HEADERS, "Authorization": f"Bearer {token}"}
+        data = _api_get("https://chatgpt.com/backend-api/wham/usage", h, cookies)
+        return _parse_wham_usage(data)
+    except Exception as e:
+        log.debug("fetch_chatgpt failed: %s", e)
+        return ProviderData("ChatGPT", error=str(e)[:80])
 
 
 def fetch_openai(api_key: str) -> ProviderData:
@@ -264,11 +346,16 @@ def fetch_glm(api_key: str) -> ProviderData:
 
 
 # Registry: config_key → (display_name, fetch_fn)
+# chatgpt_cookies is cookie-based (auto-detected); others are API key-based.
 PROVIDER_REGISTRY: dict[str, tuple[str, callable]] = {
-    "openai_key":  ("OpenAI",      fetch_openai),
-    "minimax_key": ("MiniMax",     fetch_minimax),
-    "glm_key":     ("GLM (Zhipu)", fetch_glm),
+    "chatgpt_cookies": ("ChatGPT",     fetch_chatgpt),
+    "openai_key":      ("OpenAI",      fetch_openai),
+    "minimax_key":     ("MiniMax",     fetch_minimax),
+    "glm_key":         ("GLM (Zhipu)", fetch_glm),
 }
+
+# Cookie-based providers (auto-detected from browser, not manually entered)
+_COOKIE_PROVIDERS = {"chatgpt_cookies"}
 
 
 # ── time helpers ──────────────────────────────────────────────────────────────
@@ -365,9 +452,19 @@ def _row_lines(row: LimitRow) -> list[str]:
 
 
 def _provider_lines(pd: ProviderData) -> list[str]:
-    sym = "¥" if pd.currency == "CNY" else "$"
+    sym = "¥" if pd.currency == "CNY" else ("" if pd.currency == "" else "$")
     if pd.error:
         return [f"  ⚠️  {pd.error[:60]}"]
+    # ChatGPT multi-row format (stored in pd._rows by _parse_wham_usage)
+    rows = getattr(pd, "_rows", None)
+    if rows:
+        lines = []
+        for row in rows:
+            for line in _row_lines(row):
+                if line:
+                    lines.append(line)
+        return lines
+    # Standard spending / balance format
     lines = []
     if pd.pct is not None:
         icon = _status_icon(pd.pct)
@@ -586,6 +683,33 @@ def _auto_detect_cookies() -> str | None:
     return None
 
 
+def _auto_detect_chatgpt_cookies() -> str | None:
+    """Read chatgpt.com cookies from the browser — same approach as Claude."""
+    if not _BROWSER_COOKIE3_OK:
+        return None
+    default = _default_browser_entry()
+    if default:
+        default_name, default_loader = default
+        ordered = [(default_name, default_loader)] + [
+            (n, lf()) for n, lf in _ALL_BROWSERS if n != default_name
+        ]
+    else:
+        ordered = [(n, lf()) for n, lf in _ALL_BROWSERS]
+    for name, loader in ordered:
+        if name in _KEYCHAIN_BROWSERS:
+            _warn_keychain_once()
+        try:
+            jar = loader(domain_name="chatgpt.com")
+            cookies = {c.name: c.value for c in jar}
+            if "__Secure-next-auth.session-token" in cookies:
+                cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
+                log.info("Auto-detected ChatGPT cookies from %s (%d keys)", name, len(cookies))
+                return cookie_str
+        except Exception as e:
+            log.debug("chatgpt browser_cookie3 %s: %s", name, e)
+    return None
+
+
 def _notify(title: str, subtitle: str, message: str = ""):
     """rumps.notification wrapper — silently swallows if the notification
     center is unavailable (e.g. missing Info.plist in dev environments)."""
@@ -703,7 +827,10 @@ class ClaudeBar(rumps.App):
         providers_menu = rumps.MenuItem("API Providers")
         for cfg_key, (name, _) in PROVIDER_REGISTRY.items():
             is_set = bool(self.config.get(cfg_key))
-            label = f"{'✓' if is_set else '+'} {name} API Key…"
+            if cfg_key in _COOKIE_PROVIDERS:
+                label = f"{'✓' if is_set else '+'} {name} (auto-detect)"
+            else:
+                label = f"{'✓' if is_set else '+'} {name} API Key…"
             providers_menu.add(rumps.MenuItem(
                 label, callback=self._make_provider_key_cb(cfg_key, name)
             ))
@@ -846,11 +973,20 @@ class ClaudeBar(rumps.App):
 
     def _fetch_providers(self):
         """Fetch all configured third-party API providers (sync, called from fetch thread)."""
+        # Auto-detect ChatGPT cookies if not saved yet
+        for cfg_key in _COOKIE_PROVIDERS:
+            if not self.config.get(cfg_key):
+                if cfg_key == "chatgpt_cookies":
+                    ck = _auto_detect_chatgpt_cookies()
+                    if ck:
+                        self.config[cfg_key] = ck
+                        save_config(self.config)
+
         results = []
         for cfg_key, (name, fetch_fn) in PROVIDER_REGISTRY.items():
-            api_key = self.config.get(cfg_key)
-            if api_key:
-                results.append(fetch_fn(api_key))
+            key = self.config.get(cfg_key)
+            if key:
+                results.append(fetch_fn(key))
         self._provider_data = results
 
     # ── callbacks ─────────────────────────────────────────────────────────────
@@ -863,6 +999,20 @@ class ClaudeBar(rumps.App):
 
     def _make_provider_key_cb(self, cfg_key: str, name: str):
         def _cb(_sender):
+            if cfg_key in _COOKIE_PROVIDERS:
+                # Cookie-based: re-run auto-detect
+                if cfg_key == "chatgpt_cookies":
+                    ck = _auto_detect_chatgpt_cookies()
+                    if ck:
+                        self.config[cfg_key] = ck
+                        save_config(self.config)
+                        _notify("Claude Usage Bar", f"{name} cookies updated ✓", "Fetching usage…")
+                        self._schedule_fetch()
+                    else:
+                        _notify("Claude Usage Bar", f"Could not find {name} session",
+                                f"Make sure you are logged into {name} in your browser.")
+                return
+            # API key-based
             current = self.config.get(cfg_key, "")
             key = _ask_text(
                 title=f"Claude Usage Bar — {name}",
@@ -870,7 +1020,7 @@ class ClaudeBar(rumps.App):
                 default=current,
             )
             if key is None:
-                return  # cancelled
+                return
             if key.strip():
                 self.config[cfg_key] = key.strip()
             else:
