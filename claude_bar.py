@@ -612,7 +612,7 @@ def _is_widget_installed() -> bool:
 
 
 def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
-    """Show a native macOS welcome window with two animated GIFs and info text."""
+    """Show a native macOS welcome window with side-by-side GIFs."""
     from AppKit import (
         NSWindow, NSImageView, NSImage, NSTextField, NSButton, NSFont,
         NSMakeRect, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
@@ -624,12 +624,8 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     )
     import Quartz
 
-    PAD = 28
-    GAP = 10
-    WIN_W = 560
-    GIF_W = WIN_W - PAD * 2
-    TEXT_AREA_H = 170
-    BTN_AREA_H = 50
+    PAD = 24
+    GAP = 16
 
     # Load both GIFs
     assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -638,28 +634,27 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     )
     widget_img = NSImage.alloc().initWithContentsOfFile_(gif_path)
 
-    def _img_ratio(img):
+    # Both GIFs at same height; widths from aspect ratios
+    GIF_H = 480
+    def _w_for_h(img, h):
         if not img:
-            return 1.0
+            return 200
         iw, ih = img.size().width, img.size().height
-        return iw / ih if ih > 0 else 1.0
+        return int(h * iw / ih) if ih > 0 else 200
 
-    # Both GIFs: same height, width derived from aspect ratio
-    GIF_H = 190
-    WIDGET_W = min(int(GIF_H * _img_ratio(widget_img)), GIF_W)
-    DEMO_W = min(int(GIF_H * _img_ratio(demo_img)), GIF_W)
-    demo_h = GIF_H
-    widget_h = GIF_H
-
-    WIN_H = demo_h + widget_h + TEXT_AREA_H + BTN_AREA_H + PAD * 2 + GAP * 3 + 40
+    # Left GIF: fixed wider width, fill-scaled (crops top/bottom)
+    demo_w = 320
+    widget_w = _w_for_h(widget_img, GIF_H)
+    WIN_W = PAD + demo_w + GAP + widget_w + PAD
+    WIN_H = 70 + GIF_H + 20 + 150 + 54  # header + gifs + labels + info + button
 
     # Centre on screen
     screen = NSScreen.mainScreen().frame()
-    x = (screen.size.width - WIN_W) / 2
-    y = (screen.size.height - WIN_H) / 2
+    sx = (screen.size.width - WIN_W) / 2
+    sy = (screen.size.height - WIN_H) / 2
 
     win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
-        NSMakeRect(x, y, WIN_W, WIN_H),
+        NSMakeRect(sx, sy, WIN_W, WIN_H),
         (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
          | NSWindowStyleMaskFullSizeContentView),
         NSBackingStoreBuffered,
@@ -667,7 +662,7 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     )
     win.setTitle_("")
     win.setTitlebarAppearsTransparent_(True)
-    win.setTitleVisibility_(1)  # NSWindowTitleHidden
+    win.setTitleVisibility_(1)
     win.setLevel_(NSFloatingWindowLevel)
     win.setMovableByWindowBackground_(True)
 
@@ -682,50 +677,29 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     blur.setState_(1)
     content.addSubview_(blur)
 
-    y_pos = WIN_H
-
-    # ── Title ──
-    y_pos -= 52
-    title = NSTextField.alloc().initWithFrame_(
-        NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 28)
-    )
-    title.setStringValue_("Welcome to AIQuotaBar")
-    title.setBezeled_(False)
-    title.setDrawsBackground_(False)
-    title.setEditable_(False)
-    title.setSelectable_(False)
-    title.setAlignment_(NSTextAlignmentCenter)
-    title.setFont_(NSFont.systemFontOfSize_weight_(20, 0.56))
-    content.addSubview_(title)
-
-    # ── Subtitle ──
-    y_pos -= 22
-    sub = NSTextField.alloc().initWithFrame_(
-        NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 18)
-    )
-    sub.setStringValue_("Monitor your Claude and ChatGPT usage limits in real time.")
-    sub.setBezeled_(False)
-    sub.setDrawsBackground_(False)
-    sub.setEditable_(False)
-    sub.setSelectable_(False)
-    sub.setAlignment_(NSTextAlignmentCenter)
-    sub.setFont_(NSFont.systemFontOfSize_(12))
-    sub.setTextColor_(NSColor.secondaryLabelColor())
-    content.addSubview_(sub)
-
-    # ── Stacked GIFs ──
     border_color = Quartz.CGColorCreateGenericRGB(1, 1, 1, 0.08)
 
-    def _make_gif(img, x_off, y_off, w, h):
-        container = NSView.alloc().initWithFrame_(NSMakeRect(x_off, y_off, w, h))
-        container.setWantsLayer_(True)
-        container.layer().setCornerRadius_(10)
-        container.layer().setMasksToBounds_(True)
-        container.layer().setBorderWidth_(0.5)
-        container.layer().setBorderColor_(border_color)
-        content.addSubview_(container)
+    def _make_gif(img, x, y, w, h, fill=False):
+        c = NSView.alloc().initWithFrame_(NSMakeRect(x, y, w, h))
+        c.setWantsLayer_(True)
+        c.layer().setCornerRadius_(10)
+        c.layer().setMasksToBounds_(True)
+        c.layer().setBorderWidth_(0.5)
+        c.layer().setBorderColor_(border_color)
+        content.addSubview_(c)
         if img:
-            iv = NSImageView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
+            if fill:
+                # Scale to fill: size image view to cover container, clip overflow
+                iw, ih = img.size().width, img.size().height
+                ratio = iw / ih if ih > 0 else 1.0
+                # Scale by width → compute height needed
+                iv_w = w
+                iv_h = int(w / ratio)
+                iv_y = h - iv_h  # align to top
+                iv = NSImageView.alloc().initWithFrame_(
+                    NSMakeRect(0, iv_y, iv_w, iv_h))
+            else:
+                iv = NSImageView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
             iv.setImage_(img)
             iv.setAnimates_(True)
             iv.setImageScaling_(3)
@@ -733,36 +707,51 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
             iv.setWantsLayer_(True)
             iv.layer().setMagnificationFilter_(Quartz.kCAFilterTrilinear)
             iv.layer().setMinificationFilter_(Quartz.kCAFilterTrilinear)
-            container.addSubview_(iv)
+            iv.layer().setShouldRasterize_(True)
+            iv.layer().setRasterizationScale_(3.0)
+            c.addSubview_(iv)
 
-    def _make_label(text, y_off, w, x_off=PAD):
-        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x_off, y_off, w, 14))
+    def _label(text, x, y, w, align=NSTextAlignmentCenter, size=11, weight=0.3):
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, y, w, 14))
         lbl.setStringValue_(text)
         lbl.setBezeled_(False)
         lbl.setDrawsBackground_(False)
         lbl.setEditable_(False)
         lbl.setSelectable_(False)
-        lbl.setAlignment_(NSTextAlignmentCenter)
-        lbl.setFont_(NSFont.systemFontOfSize_weight_(11, 0.3))
+        lbl.setAlignment_(align)
+        lbl.setFont_(NSFont.systemFontOfSize_weight_(size, weight))
         lbl.setTextColor_(NSColor.secondaryLabelColor())
         content.addSubview_(lbl)
 
-    # Menu bar GIF (centered, constrained width)
-    y_pos -= (demo_h + 14)
-    demo_x = (WIN_W - DEMO_W) // 2
-    _make_gif(demo_img, demo_x, y_pos, DEMO_W, demo_h)
-    y_pos -= 16
-    _make_label("Menu Bar", y_pos, DEMO_W, demo_x)
+    # ── Title + subtitle ──
+    y_top = WIN_H - 52
+    t = NSTextField.alloc().initWithFrame_(
+        NSMakeRect(PAD, y_top, WIN_W - PAD * 2, 28)
+    )
+    t.setStringValue_("Welcome to AIQuotaBar")
+    t.setBezeled_(False)
+    t.setDrawsBackground_(False)
+    t.setEditable_(False)
+    t.setSelectable_(False)
+    t.setAlignment_(NSTextAlignmentCenter)
+    t.setFont_(NSFont.systemFontOfSize_weight_(20, 0.56))
+    content.addSubview_(t)
 
-    # Widget GIF (centred)
-    y_pos -= (widget_h + GAP)
-    widget_x = (WIN_W - WIDGET_W) // 2
-    _make_gif(widget_img, widget_x, y_pos, WIDGET_W, widget_h)
-    y_pos -= 16
-    _make_label("Desktop Widget", y_pos, WIDGET_W, widget_x)
+    _label("Monitor your Claude and ChatGPT usage limits in real time.",
+           PAD, y_top - 22, WIN_W - PAD * 2, size=12)
+
+    # ── Side-by-side GIFs ──
+    gif_y = y_top - 22 - 14 - GIF_H
+    _make_gif(demo_img, PAD, gif_y, demo_w, GIF_H, fill=True)
+    _label("Menu Bar", PAD, gif_y - 16, demo_w)
+
+    widget_x = PAD + demo_w + GAP
+    _make_gif(widget_img, widget_x, gif_y, widget_w, GIF_H)
+    _label("Desktop Widget", widget_x, gif_y - 16, widget_w)
 
     # ── Info rows ──
-    y_pos -= 16
+    info_y = gif_y - 40
+    inner_w = WIN_W - PAD * 2
     rows = [
         ("Menu Bar",
          "Click the diamond icon to see session limits, weekly caps, and reset times."),
@@ -774,37 +763,37 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
          "Data updates every 60 seconds. Alerts at 80% and 95% usage."),
     ]
     for heading, desc in rows:
-        y_pos -= 20
-        h_lbl = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 16)
+        h = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(PAD, info_y, inner_w, 16)
         )
-        h_lbl.setStringValue_(heading)
-        h_lbl.setBezeled_(False)
-        h_lbl.setDrawsBackground_(False)
-        h_lbl.setEditable_(False)
-        h_lbl.setSelectable_(False)
-        h_lbl.setFont_(NSFont.systemFontOfSize_weight_(12, 0.4))
-        content.addSubview_(h_lbl)
+        h.setStringValue_(heading)
+        h.setBezeled_(False)
+        h.setDrawsBackground_(False)
+        h.setEditable_(False)
+        h.setSelectable_(False)
+        h.setAlignment_(NSTextAlignmentCenter)
+        h.setFont_(NSFont.systemFontOfSize_weight_(12, 0.4))
+        content.addSubview_(h)
+        info_y -= 16
 
-        y_pos -= 15
-        d_lbl = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 14)
+        d = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(PAD, info_y, inner_w, 14)
         )
-        d_lbl.setStringValue_(desc)
-        d_lbl.setBezeled_(False)
-        d_lbl.setDrawsBackground_(False)
-        d_lbl.setEditable_(False)
-        d_lbl.setSelectable_(False)
-        d_lbl.setFont_(NSFont.systemFontOfSize_(11))
-        d_lbl.setTextColor_(NSColor.secondaryLabelColor())
-        content.addSubview_(d_lbl)
-
-        y_pos -= 8
+        d.setStringValue_(desc)
+        d.setBezeled_(False)
+        d.setDrawsBackground_(False)
+        d.setEditable_(False)
+        d.setSelectable_(False)
+        d.setAlignment_(NSTextAlignmentCenter)
+        d.setFont_(NSFont.systemFontOfSize_(11))
+        d.setTextColor_(NSColor.secondaryLabelColor())
+        content.addSubview_(d)
+        info_y -= 22
 
     # ── "Got it" button ──
     btn_w, btn_h = 120, 30
     btn = NSButton.alloc().initWithFrame_(
-        NSMakeRect((WIN_W - btn_w) / 2, 16, btn_w, btn_h)
+        NSMakeRect((WIN_W - btn_w) / 2, 14, btn_w, btn_h)
     )
     btn.setTitle_("Got it")
     btn.setBezelStyle_(NSBezelStyleRounded)
@@ -815,8 +804,6 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
 
     win.makeKeyAndOrderFront_(None)
     NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
-
-    # Keep reference so ARC doesn't collect the window
     _show_welcome_window._active_win = win
 
 
