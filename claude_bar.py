@@ -638,17 +638,18 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     )
     widget_img = NSImage.alloc().initWithContentsOfFile_(gif_path)
 
-    def _scaled_h(img, w):
+    def _img_ratio(img):
         if not img:
-            return 180
+            return 1.0
         iw, ih = img.size().width, img.size().height
-        return int(w * ih / iw) if iw > 0 else 180
+        return iw / ih if ih > 0 else 1.0
 
-    # Menu bar GIF: constrain width to 240 (it's very tall/narrow)
-    DEMO_W = 240
-    demo_h = min(_scaled_h(demo_img, DEMO_W), 300)
-    # Widget GIF: full width
-    widget_h = _scaled_h(widget_img, GIF_W)
+    # Both GIFs: same height, width derived from aspect ratio
+    GIF_H = 190
+    WIDGET_W = min(int(GIF_H * _img_ratio(widget_img)), GIF_W)
+    DEMO_W = min(int(GIF_H * _img_ratio(demo_img)), GIF_W)
+    demo_h = GIF_H
+    widget_h = GIF_H
 
     WIN_H = demo_h + widget_h + TEXT_AREA_H + BTN_AREA_H + PAD * 2 + GAP * 3 + 40
 
@@ -753,11 +754,12 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     y_pos -= 16
     _make_label("Menu Bar", y_pos, DEMO_W, demo_x)
 
-    # Widget GIF (full width)
+    # Widget GIF (centred)
     y_pos -= (widget_h + GAP)
-    _make_gif(widget_img, PAD, y_pos, GIF_W, widget_h)
+    widget_x = (WIN_W - WIDGET_W) // 2
+    _make_gif(widget_img, widget_x, y_pos, WIDGET_W, widget_h)
     y_pos -= 16
-    _make_label("Desktop Widget", y_pos, GIF_W)
+    _make_label("Desktop Widget", y_pos, WIDGET_W, widget_x)
 
     # ── Info rows ──
     y_pos -= 16
