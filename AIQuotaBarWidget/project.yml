@@ -1,0 +1,72 @@
+name: AIQuotaBarWidget
+options:
+  bundleIdPrefix: com.aiquotabar
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  AIQuotaBarHost:
+    type: application
+    platform: macOS
+    sources:
+      - path: AIQuotaBarHost
+        excludes:
+          - "*.entitlements"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiquotabar.host
+        CODE_SIGN_ENTITLEMENTS: AIQuotaBarHost/AIQuotaBarHost.entitlements
+        INFOPLIST_KEY_LSUIElement: true
+        GENERATE_INFOPLIST_FILE: "YES"
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    dependencies:
+      - target: AIQuotaBarWidgetExtension
+        embed: true
+        codeSign: true
+
+  AIQuotaBarWidgetExtension:
+    type: app-extension
+    platform: macOS
+    product: AIQuotaBarWidgetExtension
+    sources:
+      - path: AIQuotaBarWidgetExtension
+        excludes:
+          - "*.entitlements"
+          - Info.plist
+    info:
+      path: AIQuotaBarWidgetExtension/Info.plist
+      properties:
+        CFBundleDisplayName: AIQuotaBarWidget
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.aiquotabar.host.widget
+        CODE_SIGN_ENTITLEMENTS: AIQuotaBarWidgetExtension/AIQuotaBarWidgetExtension.entitlements
+        CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: "YES"
+    dependencies:
+      - framework: WidgetKit.framework
+        embed: false
+      - framework: SwiftUI.framework
+        embed: false
+
+schemes:
+  AIQuotaBarHost:
+    build:
+      targets:
+        AIQuotaBarHost: all
+        AIQuotaBarWidgetExtension: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -19,97 +19,103 @@
   <link rel="canonical" href="https://yagcioglutoprak.github.io/AIQuotaBar/">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
   <style>
     :root {
-      --bg:           #1c1c1e;
-      --bg-elevated:  #2c2c2e;
-      --bg-glass:     rgba(44, 44, 46, 0.72);
-      --bg-glass-2:   rgba(255,255,255,0.05);
-      --border:       rgba(255,255,255,0.10);
-      --border-dim:   rgba(255,255,255,0.06);
-      --text:         #f5f5f7;
-      --text-2:       rgba(245,245,247,0.72);
-      --text-3:       rgba(245,245,247,0.44);
-      --green:        #30d158;
-      --yellow:       #ffd60a;
-      --red:          #ff453a;
-      --orange:       #ff9f0a;
-      --blue:         #0a84ff;
-      --purple:       #bf5af2;
+      --bg:           #0a0a0b;
+      --bg-elevated:  #141416;
+      --bg-card:      #18181b;
+      --bg-glass:     rgba(24, 24, 27, 0.80);
+      --bg-glass-2:   rgba(255,255,255,0.04);
+      --border:       rgba(255,255,255,0.08);
+      --border-hover: rgba(255,255,255,0.14);
+      --text:         #fafafa;
+      --text-2:       rgba(250,250,250,0.64);
+      --text-3:       rgba(250,250,250,0.38);
+      --green:        #22c55e;
+      --yellow:       #eab308;
+      --red:          #ef4444;
+      --orange:       #f97316;
+      --blue:         #3b82f6;
+      --purple:       #a855f7;
+      --claude:       #d4875a;
+      --gpt:          #10a37f;
       --traffic-red:  #ff5f57;
       --traffic-yel:  #ffbd2e;
       --traffic-grn:  #28c840;
-      --claude-color: #d4875a;
-      --gpt-color:    #10a37f;
-      --sans: -apple-system, BlinkMacSystemFont, "Outfit", "Segoe UI", sans-serif;
+      --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       --mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+      --radius: 12px;
       --radius-lg: 16px;
-      --radius-xl: 22px;
+      --radius-xl: 20px;
     }
 
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
     html { scroll-behavior: smooth; }
 
     body {
       font-family: var(--sans);
       background: var(--bg);
       color: var(--text);
-      line-height: 1.5;
+      line-height: 1.6;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
-    /* ── Subtle background ambiance ─────────────────────────────────── */
-    body::before {
-      content: '';
-      position: fixed;
-      inset: 0;
-      background:
-        radial-gradient(ellipse 80% 50% at 20% 10%, rgba(212,135,90,0.07) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 80%, rgba(16,163,127,0.05) 0%, transparent 60%),
-        radial-gradient(ellipse 50% 60% at 50% 50%, rgba(191,90,242,0.04) 0%, transparent 70%);
+    /* ── Ambient glow ──────────────────────────────────────────────────── */
+    .hero-glow {
+      position: absolute;
+      top: -200px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      height: 600px;
+      background: radial-gradient(ellipse 60% 50% at 50% 40%, rgba(212,135,90,0.10) 0%, transparent 70%);
       pointer-events: none;
       z-index: 0;
     }
 
-    * { position: relative; z-index: 1; }
-
-    /* ── Nav ─────────────────────────────────────────────────────────── */
+    /* ── Nav ────────────────────────────────────────────────────────────── */
     nav {
       position: fixed;
       top: 0; left: 0; right: 0;
-      height: 52px;
+      height: 56px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 0 28px;
-      background: rgba(28,28,30,0.82);
-      backdrop-filter: blur(24px) saturate(180%);
-      -webkit-backdrop-filter: blur(24px) saturate(180%);
-      border-bottom: 1px solid var(--border-dim);
+      padding: 0 24px;
+      background: rgba(10,10,11,0.80);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border-bottom: 1px solid var(--border);
       z-index: 1000;
+    }
+
+    .nav-left {
+      display: flex;
+      align-items: center;
+      gap: 24px;
     }
 
     .nav-logo {
       font-size: 15px;
-      font-weight: 600;
-      letter-spacing: -0.3px;
+      font-weight: 700;
+      letter-spacing: -0.4px;
       color: var(--text);
       text-decoration: none;
     }
 
     .nav-links {
       display: flex;
-      gap: 8px;
+      gap: 4px;
       align-items: center;
     }
 
     .nav-links a {
-      font-size: 14px;
-      font-weight: 450;
+      font-size: 13px;
+      font-weight: 500;
       color: var(--text-2);
       text-decoration: none;
       padding: 6px 12px;
@@ -118,100 +124,170 @@
     }
     .nav-links a:hover { color: var(--text); background: var(--bg-glass-2); }
 
-    .nav-github {
-      display: flex;
+    .nav-star {
+      display: inline-flex;
       align-items: center;
       gap: 6px;
       font-size: 13px;
-      font-weight: 500;
+      font-weight: 600;
       color: var(--text);
       text-decoration: none;
-      padding: 6px 14px 6px 12px;
+      padding: 7px 16px 7px 12px;
       border: 1px solid var(--border);
-      border-radius: 20px;
+      border-radius: 8px;
       background: var(--bg-glass-2);
-      transition: background 0.15s, border-color 0.15s;
+      transition: all 0.15s;
     }
-    .nav-github:hover { background: rgba(255,255,255,0.09); border-color: rgba(255,255,255,0.18); }
-    .nav-github svg { width: 15px; height: 15px; fill: currentColor; }
+    .nav-star:hover { background: rgba(255,255,255,0.08); border-color: var(--border-hover); }
+    .nav-star svg { width: 16px; height: 16px; fill: currentColor; opacity: 0.7; }
+    .nav-star-count {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-2);
+      background: rgba(255,255,255,0.06);
+      padding: 1px 7px;
+      border-radius: 10px;
+      margin-left: 2px;
+    }
 
-    /* ── Sections layout ─────────────────────────────────────────────── */
-    section { padding: 100px 28px; max-width: 1100px; margin: 0 auto; }
-    .full-width { max-width: none; padding-left: 0; padding-right: 0; }
+    /* ── Sections ───────────────────────────────────────────────────────── */
+    section { padding: 96px 24px; max-width: 1080px; margin: 0 auto; }
 
-    /* ── Hero ────────────────────────────────────────────────────────── */
+    /* ── Hero ───────────────────────────────────────────────────────────── */
     #hero {
       padding-top: 140px;
-      padding-bottom: 60px;
+      padding-bottom: 48px;
       text-align: center;
+      position: relative;
     }
 
     .hero-badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      font-size: 12px;
+      gap: 8px;
+      font-size: 13px;
       font-weight: 500;
       color: var(--text-2);
       background: var(--bg-glass-2);
       border: 1px solid var(--border);
-      border-radius: 20px;
-      padding: 5px 14px;
-      margin-bottom: 28px;
-      letter-spacing: 0.2px;
+      border-radius: 100px;
+      padding: 6px 16px 6px 10px;
+      margin-bottom: 32px;
     }
-    .hero-badge span { color: var(--green); font-size: 10px; }
+    .hero-badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px rgba(34,197,94,0.5);
+      animation: pulse-dot 2s ease-in-out infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
 
     h1 {
-      font-size: clamp(42px, 7vw, 72px);
-      font-weight: 800;
+      font-size: clamp(40px, 6.5vw, 68px);
+      font-weight: 900;
       letter-spacing: -2.5px;
-      line-height: 1.04;
+      line-height: 1.05;
       color: var(--text);
-      max-width: 820px;
-      margin: 0 auto 20px;
+      max-width: 780px;
+      margin: 0 auto 24px;
     }
 
-    h1 em {
-      font-style: normal;
-      background: linear-gradient(135deg, var(--claude-color) 0%, #e8a87c 50%, var(--gpt-color) 100%);
+    h1 .gradient {
+      background: linear-gradient(135deg, var(--claude) 0%, #e8a87c 40%, var(--gpt) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
     .hero-sub {
-      font-size: clamp(16px, 2.2vw, 20px);
+      font-size: clamp(16px, 2vw, 19px);
       font-weight: 400;
       color: var(--text-2);
-      max-width: 540px;
-      margin: 0 auto 44px;
-      line-height: 1.6;
-      letter-spacing: -0.2px;
+      max-width: 520px;
+      margin: 0 auto 40px;
+      line-height: 1.65;
     }
 
-    /* ── Terminal block ──────────────────────────────────────────────── */
+    /* ── Hero Actions ──────────────────────────────────────────────────── */
+    .hero-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--sans);
+      font-size: 15px;
+      font-weight: 600;
+      color: #fff;
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      background: var(--text);
+      color: var(--bg);
+      border: none;
+      cursor: pointer;
+      transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s;
+      letter-spacing: -0.2px;
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px) scale(1.02);
+      opacity: 0.9;
+    }
+
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--sans);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: -0.2px;
+    }
+    .btn-secondary:hover { background: var(--bg-glass-2); border-color: var(--border-hover); }
+    .btn-secondary svg { width: 18px; height: 18px; fill: currentColor; }
+
+    /* ── Terminal / Install block ───────────────────────────────────────── */
     .terminal {
       display: inline-block;
-      background: #111112;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 13px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
       overflow: hidden;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.04);
       text-align: left;
       max-width: 100%;
+      box-shadow: 0 4px 32px rgba(0,0,0,0.3);
     }
 
     .terminal-chrome {
       display: flex;
       align-items: center;
       gap: 6px;
-      padding: 11px 14px;
-      background: rgba(255,255,255,0.04);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--border);
     }
 
-    .dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
     .dot-r { background: var(--traffic-red); }
     .dot-y { background: var(--traffic-yel); }
     .dot-g { background: var(--traffic-grn); }
@@ -219,11 +295,17 @@
     .terminal-body {
       display: flex;
       align-items: center;
-      gap: 12px;
-      padding: 14px 20px;
+      gap: 10px;
+      padding: 14px 16px;
     }
 
-    .terminal-prompt { color: var(--green); font-family: var(--mono); font-size: 13px; flex-shrink: 0; }
+    .terminal-prompt {
+      color: var(--green);
+      font-family: var(--mono);
+      font-size: 13px;
+      flex-shrink: 0;
+      user-select: none;
+    }
 
     .terminal-cmd {
       font-family: var(--mono);
@@ -237,216 +319,135 @@
     .copy-btn {
       flex-shrink: 0;
       margin-left: auto;
-      padding: 5px 10px;
-      background: rgba(255,255,255,0.07);
+      padding: 5px 12px;
+      background: rgba(255,255,255,0.06);
       border: 1px solid var(--border);
       border-radius: 6px;
       color: var(--text-3);
       font-family: var(--sans);
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 500;
       cursor: pointer;
       transition: all 0.15s;
       white-space: nowrap;
     }
-    .copy-btn:hover { background: rgba(255,255,255,0.12); color: var(--text); }
-    .copy-btn.copied { color: var(--green); border-color: rgba(48,209,88,0.3); }
+    .copy-btn:hover { background: rgba(255,255,255,0.1); color: var(--text); }
+    .copy-btn.copied { color: var(--green); border-color: rgba(34,197,94,0.3); background: rgba(34,197,94,0.08); }
 
-    /* ── macOS Menu Bar Mockup ───────────────────────────────────────── */
-    .menubar-mockup-wrap {
-      margin-top: 64px;
+    /* ── Hero Demo ─────────────────────────────────────────────────────── */
+    .hero-demo {
+      margin-top: 56px;
       display: flex;
       justify-content: center;
       position: relative;
     }
 
-    .menubar-mockup-wrap::before {
+    .hero-demo::before {
       content: '';
       position: absolute;
-      bottom: -20px;
+      bottom: -40px;
       left: 50%;
       transform: translateX(-50%);
-      width: 70%;
-      height: 100px;
-      background: radial-gradient(ellipse, rgba(212,135,90,0.15) 0%, transparent 70%);
+      width: 80%;
+      height: 120px;
+      background: radial-gradient(ellipse, rgba(212,135,90,0.12) 0%, transparent 70%);
       pointer-events: none;
     }
 
-    .menubar-scene {
-      width: 580px;
+    .demo-window {
+      display: inline-block;
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.10);
+      box-shadow:
+        0 32px 80px rgba(0,0,0,0.6),
+        0 0 0 1px rgba(255,255,255,0.04);
       max-width: 100%;
+      position: relative;
+      width: 660px;
     }
 
-    .macos-menubar {
-      background: rgba(30,30,32,0.96);
-      border-radius: 10px 10px 0 0;
-      border: 1px solid rgba(255,255,255,0.13);
-      border-bottom: none;
-      padding: 0 16px;
-      height: 28px;
+    .demo-titlebar {
+      background: #1e1e20;
+      padding: 11px 16px;
       display: flex;
       align-items: center;
-      justify-content: flex-end;
-      gap: 10px;
-      font-size: 12.5px;
-      font-weight: 500;
-      color: var(--text);
-      backdrop-filter: blur(20px);
+      gap: 6px;
+      border-bottom: 1px solid rgba(0,0,0,0.3);
     }
 
-    .menubar-sys-icons {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      color: var(--text-3);
-      font-size: 11px;
-    }
-
-    .menubar-app-indicator {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 5px;
-      padding: 2px 8px;
+    .demo-title-text {
       font-size: 12px;
       font-weight: 500;
-      cursor: default;
-    }
-
-    .indicator-dot { font-size: 10px; }
-
-    .macos-dropdown {
-      background: rgba(40,40,42,0.96);
-      border: 1px solid rgba(255,255,255,0.13);
-      border-top: none;
-      border-radius: 0 0 12px 12px;
-      padding: 8px 0 10px;
-      backdrop-filter: blur(40px) saturate(180%);
-      -webkit-backdrop-filter: blur(40px) saturate(180%);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 1px 0 rgba(255,255,255,0.06) inset;
-    }
-
-    .menu-section-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 10px 14px 4px;
-      font-size: 10.5px;
-      font-weight: 600;
-      letter-spacing: 0.6px;
       color: var(--text-3);
-      text-transform: uppercase;
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
     }
 
-    .menu-row {
-      padding: 5px 14px;
+    .demo-body img {
+      display: block;
+      width: 100%;
     }
 
-    .menu-row-header {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12.5px;
-      font-weight: 500;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-
-    .menu-row-header .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .status-dot.green  { background: var(--green); box-shadow: 0 0 6px rgba(48,209,88,0.5); }
-    .status-dot.yellow { background: var(--yellow); box-shadow: 0 0 6px rgba(255,214,10,0.5); }
-    .status-dot.red    { background: var(--red); box-shadow: 0 0 6px rgba(255,69,58,0.5); }
-
-    .menu-row-pct { margin-left: auto; font-size: 12px; color: var(--text-2); font-weight: 500; }
-
-    .menu-progress-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 0 0 0 14px;
-    }
-
-    .menu-progress {
-      flex: 1;
-      height: 3px;
-      background: rgba(255,255,255,0.1);
-      border-radius: 2px;
-      overflow: hidden;
-    }
-
-    .menu-progress-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 0.3s ease;
-    }
-    .fill-green  { background: linear-gradient(90deg, #30d158, #4ade80); }
-    .fill-yellow { background: linear-gradient(90deg, #ffd60a, #fb923c); }
-    .fill-red    { background: linear-gradient(90deg, #ff453a, #f87171); }
-
-    .menu-reset-time {
-      font-size: 10.5px;
-      color: var(--text-3);
-      white-space: nowrap;
-    }
-
-    .menu-divider {
-      height: 1px;
-      background: var(--border-dim);
-      margin: 6px 0;
-    }
-
-    /* ── Social Proof ────────────────────────────────────────────────── */
-    .social-proof {
+    /* ── Social proof strip ────────────────────────────────────────────── */
+    .proof-strip {
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 0;
+      gap: 32px;
+      padding: 0 24px 80px;
+      max-width: 800px;
       margin: 0 auto;
-      max-width: 1100px;
-      padding: 0 28px 80px;
+      flex-wrap: wrap;
+    }
+
+    .proof-divider {
+      width: 1px;
+      height: 32px;
+      background: var(--border);
     }
 
     .proof-item {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding: 14px 32px;
-      border: 1px solid var(--border-dim);
-      flex: 1;
-      max-width: 260px;
-      background: var(--bg-glass-2);
     }
 
-    .proof-item:first-child { border-radius: 12px 0 0 12px; }
-    .proof-item:last-child  { border-radius: 0 12px 12px 0; border-left: none; }
+    .proof-icon-wrap {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      flex-shrink: 0;
+    }
+    .proof-hn { background: rgba(255,102,0,0.12); }
+    .proof-ph { background: rgba(218,81,38,0.12); }
+    .proof-gh { background: rgba(255,255,255,0.06); }
 
-    .proof-icon { font-size: 20px; flex-shrink: 0; }
-    .proof-label { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.2; }
-    .proof-sub   { font-size: 11.5px; color: var(--text-3); }
+    .proof-text { text-align: left; }
+    .proof-label { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.3; }
+    .proof-sub { font-size: 12px; color: var(--text-3); font-weight: 400; }
 
-    /* ── Features ────────────────────────────────────────────────────── */
-    #features { padding-top: 20px; }
+    /* ── Features ───────────────────────────────────────────────────────── */
+    #features { padding-top: 32px; }
 
-    .section-eyebrow {
-      font-size: 12px;
+    .section-label {
+      font-size: 13px;
       font-weight: 600;
-      letter-spacing: 1px;
+      letter-spacing: 0.5px;
       text-transform: uppercase;
-      color: var(--claude-color);
+      color: var(--claude);
       margin-bottom: 12px;
       text-align: center;
     }
 
     .section-title {
-      font-size: clamp(28px, 4vw, 44px);
-      font-weight: 700;
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800;
       letter-spacing: -1.5px;
       line-height: 1.1;
       color: var(--text);
@@ -454,11 +455,11 @@
       margin-bottom: 12px;
     }
 
-    .section-sub {
+    .section-desc {
       font-size: 16px;
       color: var(--text-2);
       text-align: center;
-      max-width: 500px;
+      max-width: 480px;
       margin: 0 auto 56px;
       line-height: 1.6;
     }
@@ -466,39 +467,38 @@
     .feature-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 16px;
+      gap: 12px;
     }
 
     .feature-card {
-      background: var(--bg-glass-2);
+      background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      padding: 28px;
-      backdrop-filter: blur(20px);
-      transition: transform 0.25s cubic-bezier(0.34,1.56,0.64,1), border-color 0.2s;
+      border-radius: var(--radius-lg);
+      padding: 28px 24px;
+      transition: transform 0.2s ease, border-color 0.2s;
     }
     .feature-card:hover {
-      transform: translateY(-3px);
-      border-color: rgba(255,255,255,0.18);
+      transform: translateY(-2px);
+      border-color: var(--border-hover);
     }
 
     .feature-icon {
-      width: 44px;
-      height: 44px;
-      border-radius: 12px;
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 22px;
-      margin-bottom: 18px;
+      font-size: 20px;
+      margin-bottom: 16px;
     }
-    .icon-orange { background: rgba(212,135,90,0.15); }
-    .icon-green  { background: rgba(48,209,88,0.12); }
-    .icon-blue   { background: rgba(10,132,255,0.12); }
+    .icon-orange { background: rgba(212,135,90,0.12); }
+    .icon-green  { background: rgba(34,197,94,0.10); }
+    .icon-blue   { background: rgba(59,130,246,0.10); }
 
     .feature-card h3 {
-      font-size: 16px;
-      font-weight: 600;
+      font-size: 15px;
+      font-weight: 700;
       letter-spacing: -0.3px;
       color: var(--text);
       margin-bottom: 8px;
@@ -513,70 +513,28 @@
     .feature-tags {
       display: flex;
       flex-wrap: wrap;
-      gap: 6px;
+      gap: 5px;
       margin-top: 14px;
     }
 
     .tag {
       font-size: 11px;
       font-weight: 500;
-      padding: 3px 9px;
+      padding: 3px 8px;
       border-radius: 6px;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid var(--border-dim);
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.06);
       color: var(--text-3);
     }
 
-    /* ── Demo ────────────────────────────────────────────────────────── */
-    #demo { text-align: center; }
-
-    .macos-window {
-      display: inline-block;
-      border-radius: 14px;
-      overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.13);
-      box-shadow:
-        0 40px 100px rgba(0,0,0,0.7),
-        0 0 0 1px rgba(255,255,255,0.05),
-        0 0 80px rgba(212,135,90,0.08);
-      max-width: 100%;
-      position: relative;
-    }
-
-    .window-titlebar {
-      background: #323234;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      border-bottom: 1px solid rgba(0,0,0,0.3);
-    }
-
-    .window-title-text {
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-3);
-      position: absolute;
-      left: 50%;
-      transform: translateX(-50%);
-    }
-
-    .window-body img {
-      display: block;
-      width: 660px;
-      max-width: 100%;
-    }
-
-    /* ── How it works ────────────────────────────────────────────────── */
-    #how {
-      text-align: center;
-    }
+    /* ── How it works ──────────────────────────────────────────────────── */
+    #how { text-align: center; }
 
     .steps {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 0;
-      max-width: 820px;
+      max-width: 840px;
       margin: 0 auto;
       position: relative;
     }
@@ -584,249 +542,282 @@
     .steps::before {
       content: '';
       position: absolute;
-      top: 28px;
+      top: 26px;
       left: calc(16.66% + 14px);
       right: calc(16.66% + 14px);
       height: 1px;
-      background: linear-gradient(90deg, var(--border), rgba(212,135,90,0.4), var(--border));
+      background: linear-gradient(90deg, var(--border), rgba(212,135,90,0.3), var(--border));
       z-index: 0;
     }
 
-    .step {
-      padding: 0 20px;
-      text-align: center;
-    }
+    .step { padding: 0 20px; text-align: center; }
 
     .step-num {
-      width: 56px;
-      height: 56px;
+      width: 52px;
+      height: 52px;
       border-radius: 50%;
-      background: var(--bg-glass-2);
+      background: var(--bg-card);
       border: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
-      margin: 0 auto 20px;
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-2);
+      margin: 0 auto 18px;
       position: relative;
       z-index: 1;
     }
 
     .step h3 {
       font-size: 15px;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text);
-      margin-bottom: 8px;
-      letter-spacing: -0.3px;
+      margin-bottom: 6px;
+      letter-spacing: -0.2px;
     }
 
     .step p { font-size: 13.5px; color: var(--text-2); line-height: 1.6; }
 
     .step-code {
       margin-top: 12px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid var(--border-dim);
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
       border-radius: 8px;
       padding: 8px 12px;
       font-family: var(--mono);
       font-size: 11px;
       color: var(--green);
       text-align: left;
+      word-break: break-all;
     }
 
-    /* ── Install ─────────────────────────────────────────────────────── */
+    /* ── Install section ───────────────────────────────────────────────── */
     #install { text-align: center; }
 
     .install-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
-      margin-top: 0;
+      gap: 12px;
       text-align: left;
     }
 
     .install-card {
-      background: var(--bg-glass-2);
+      background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
+      border-radius: var(--radius-lg);
       overflow: hidden;
-      backdrop-filter: blur(20px);
-      transition: border-color 0.2s;
+      transition: border-color 0.15s;
     }
-    .install-card:hover { border-color: rgba(255,255,255,0.16); }
+    .install-card:hover { border-color: var(--border-hover); }
 
     .install-card-header {
-      padding: 20px 22px 0;
+      padding: 20px 20px 0;
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       justify-content: space-between;
     }
 
     .install-label {
       font-size: 15px;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text);
-      letter-spacing: -0.3px;
+      letter-spacing: -0.2px;
     }
 
-    .badge-recommended {
+    .badge {
       font-size: 10px;
       font-weight: 600;
       padding: 3px 8px;
       border-radius: 6px;
-      background: rgba(48,209,88,0.12);
-      border: 1px solid rgba(48,209,88,0.25);
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+
+    .badge-green {
+      background: rgba(34,197,94,0.10);
+      border: 1px solid rgba(34,197,94,0.20);
       color: var(--green);
-      letter-spacing: 0.3px;
     }
 
-    .badge-tap {
-      font-size: 10px;
-      font-weight: 600;
-      padding: 3px 8px;
-      border-radius: 6px;
-      background: rgba(10,132,255,0.1);
-      border: 1px solid rgba(10,132,255,0.2);
+    .badge-blue {
+      background: rgba(59,130,246,0.10);
+      border: 1px solid rgba(59,130,246,0.20);
       color: var(--blue);
-      letter-spacing: 0.3px;
     }
 
-    .install-terminal {
-      margin: 14px 0 0;
-    }
-
-    .install-terminal .terminal-chrome {
-      border-radius: 0;
-    }
-
-    .install-terminal .terminal-body {
-      padding: 16px 20px;
-    }
-
+    .install-terminal { margin: 14px 0 0; }
+    .install-terminal .terminal-chrome { border-radius: 0; }
+    .install-terminal .terminal-body { padding: 14px 16px; }
     .install-terminal .terminal-cmd {
       white-space: pre;
       font-size: 12px;
       line-height: 1.8;
     }
 
-    /* ── CTA ─────────────────────────────────────────────────────────── */
+    .install-note {
+      font-size: 13px;
+      color: var(--text-3);
+      margin-top: 20px;
+    }
+
+    /* ── Star CTA ──────────────────────────────────────────────────────── */
     #cta {
       text-align: center;
-      padding: 80px 28px 100px;
+      padding: 80px 24px 100px;
     }
 
-    #cta h2 {
-      font-size: clamp(28px, 4vw, 48px);
+    .cta-box {
+      max-width: 580px;
+      margin: 0 auto;
+      padding: 48px 40px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-box::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(212,135,90,0.4), transparent);
+    }
+
+    .cta-box h2 {
+      font-size: clamp(24px, 3.5vw, 36px);
       font-weight: 800;
-      letter-spacing: -1.5px;
+      letter-spacing: -1px;
       color: var(--text);
-      margin-bottom: 12px;
-      line-height: 1.1;
+      margin-bottom: 10px;
+      line-height: 1.15;
     }
 
-    #cta p {
-      font-size: 16px;
+    .cta-box p {
+      font-size: 15px;
       color: var(--text-2);
-      margin-bottom: 36px;
+      margin-bottom: 28px;
+      line-height: 1.6;
     }
 
-    .btn-github {
+    .btn-star {
       display: inline-flex;
       align-items: center;
-      gap: 9px;
+      gap: 8px;
+      font-family: var(--sans);
       font-size: 16px;
-      font-weight: 600;
-      color: #fff;
+      font-weight: 700;
+      color: var(--bg);
       text-decoration: none;
-      padding: 14px 32px;
-      border-radius: 50px;
-      background: linear-gradient(135deg, #6d28d9 0%, #7c3aed 50%, #8b5cf6 100%);
-      box-shadow: 0 4px 24px rgba(109,40,217,0.4), 0 1px 0 rgba(255,255,255,0.15) inset;
-      transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s;
+      padding: 14px 28px;
+      border-radius: 10px;
+      background: var(--text);
+      transition: transform 0.2s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s;
       letter-spacing: -0.2px;
     }
-    .btn-github:hover {
+    .btn-star:hover {
       transform: translateY(-2px) scale(1.02);
-      box-shadow: 0 8px 36px rgba(109,40,217,0.5), 0 1px 0 rgba(255,255,255,0.15) inset;
+      opacity: 0.9;
     }
-    .btn-github svg { width: 18px; height: 18px; fill: currentColor; }
+    .btn-star svg { width: 18px; height: 18px; }
 
-    .btn-github .star-icon { font-size: 15px; }
-
-    /* ── Footer ──────────────────────────────────────────────────────── */
+    /* ── Footer ─────────────────────────────────────────────────────────── */
     footer {
-      border-top: 1px solid var(--border-dim);
-      padding: 24px 28px;
+      border-top: 1px solid var(--border);
+      padding: 24px;
       text-align: center;
       font-size: 12.5px;
       color: var(--text-3);
     }
-    footer a { color: var(--text-3); text-decoration: none; }
+    footer a { color: var(--text-3); text-decoration: none; transition: color 0.15s; }
     footer a:hover { color: var(--text-2); }
 
-    /* ── Scroll reveal ───────────────────────────────────────────────── */
+    /* ── Scroll reveal ─────────────────────────────────────────────────── */
     .reveal {
       opacity: 0;
-      transform: translateY(20px);
-      transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.34,1.2,0.64,1);
+      transform: translateY(16px);
+      transition: opacity 0.5s ease, transform 0.5s cubic-bezier(0.25,1,0.5,1);
     }
     .reveal.visible { opacity: 1; transform: translateY(0); }
-    .reveal-delay-1 { transition-delay: 0.1s; }
-    .reveal-delay-2 { transition-delay: 0.2s; }
-    .reveal-delay-3 { transition-delay: 0.3s; }
+    .reveal-d1 { transition-delay: 0.08s; }
+    .reveal-d2 { transition-delay: 0.16s; }
+    .reveal-d3 { transition-delay: 0.24s; }
 
-    /* ── Responsive ──────────────────────────────────────────────────── */
+    /* ── Responsive ────────────────────────────────────────────────────── */
     @media (max-width: 768px) {
-      nav { padding: 0 18px; }
+      nav { padding: 0 16px; }
       .nav-links { display: none; }
-      section { padding: 70px 20px; }
+      section { padding: 64px 20px; }
       h1 { letter-spacing: -1.5px; }
       .feature-grid { grid-template-columns: 1fr; }
       .install-grid { grid-template-columns: 1fr; }
-      .steps { grid-template-columns: 1fr; gap: 32px; }
+      .steps { grid-template-columns: 1fr; gap: 28px; }
       .steps::before { display: none; }
-      .social-proof { flex-direction: column; align-items: center; }
-      .proof-item { border-radius: 12px !important; border-left: 1px solid var(--border-dim) !important; max-width: 300px; width: 100%; }
+      .proof-strip { flex-direction: column; gap: 16px; }
+      .proof-divider { display: none; }
       .terminal-cmd { font-size: 11px; }
+      .hero-actions { flex-direction: column; }
+      .btn-primary, .btn-secondary { width: 100%; max-width: 300px; justify-content: center; }
+      .cta-box { padding: 36px 24px; }
     }
 
     @media (max-width: 480px) {
-      h1 { font-size: 36px; }
-      .menubar-scene { display: none; }
+      h1 { font-size: 34px; letter-spacing: -1px; }
+      .hero-demo { display: none; }
     }
   </style>
 </head>
 <body>
 
-<!-- ── Nav ──────────────────────────────────────────────────────────── -->
+<!-- ── Nav ───────────────────────────────────────────────────────────── -->
 <nav>
-  <a href="#" class="nav-logo">AIQuotaBar</a>
-  <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#how">How it works</a>
-    <a href="#install">Install</a>
+  <div class="nav-left">
+    <a href="#" class="nav-logo">AIQuotaBar</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it works</a>
+      <a href="#install">Install</a>
+    </div>
   </div>
-  <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" class="nav-github">
-    <svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-    GitHub
+  <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" rel="noopener" class="nav-star">
+    <svg viewBox="0 0 16 16"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/></svg>
+    Star on GitHub
+    <span class="nav-star-count" id="star-count"></span>
   </a>
 </nav>
 
-<!-- ── Hero ─────────────────────────────────────────────────────────── -->
+<!-- ── Hero ──────────────────────────────────────────────────────────── -->
 <section id="hero">
+  <div class="hero-glow"></div>
+
   <div class="hero-badge reveal">
-    <span>✦</span> Free &amp; Open Source · MIT License
+    <div class="hero-badge-dot"></div>
+    Free and open source &middot; MIT License
   </div>
 
-  <h1 class="reveal reveal-delay-1">
-    Know your <em>Claude limit</em><br>before it knows you.
+  <h1 class="reveal reveal-d1">
+    Your AI usage,<br>
+    <span class="gradient">always visible.</span>
   </h1>
 
-  <p class="hero-sub reveal reveal-delay-2">
-    Live usage tracking for Claude.ai and ChatGPT in your macOS menu bar. Zero setup — reads your browser session automatically.
+  <p class="hero-sub reveal reveal-d2">
+    See Claude.ai and ChatGPT limits live in your macOS menu bar. Auto-detects your browser session. No config, no tokens, no extensions.
   </p>
 
-  <div class="terminal reveal reveal-delay-3">
+  <div class="hero-actions reveal reveal-d3">
+    <button class="btn-primary" onclick="copyInstall(this)">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Copy install command
+    </button>
+    <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" rel="noopener" class="btn-secondary">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      View on GitHub
+    </a>
+  </div>
+
+  <div class="terminal reveal reveal-d3" style="margin-top: 16px;">
     <div class="terminal-chrome">
       <div class="dot dot-r"></div>
       <div class="dot dot-y"></div>
@@ -840,65 +831,90 @@
   </div>
 
   <!-- Hero Demo GIF -->
-  <div style="margin-top:56px;display:flex;justify-content:center;" class="reveal">
-    <div class="macos-window" style="width:660px;">
-      <div class="window-titlebar">
+  <div class="hero-demo reveal">
+    <div class="demo-window">
+      <div class="demo-titlebar">
         <div class="dot dot-r"></div>
         <div class="dot dot-y"></div>
         <div class="dot dot-g"></div>
-        <span class="window-title-text">AIQuotaBar — Live Preview</span>
+        <span class="demo-title-text">AIQuotaBar</span>
       </div>
-      <div class="window-body">
+      <div class="demo-body">
         <img src="https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/assets/demo.gif"
-             alt="AIQuotaBar demo — live Claude and ChatGPT usage in macOS menu bar"
-             style="width:100%;display:block;">
+             alt="AIQuotaBar demo showing live Claude and ChatGPT usage tracking in the macOS menu bar"
+             loading="eager"
+             width="660" height="400">
       </div>
     </div>
   </div>
 </section>
 
 <!-- ── Social Proof ──────────────────────────────────────────────────── -->
-<div class="social-proof reveal">
+<div class="proof-strip reveal">
   <div class="proof-item">
-    <span class="proof-icon">🔶</span>
-    <div>
+    <div class="proof-icon-wrap proof-hn">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="#ff6600"><path d="M0 0h16v16H0z" fill="#ff6600" rx="2"/><text x="8" y="12" text-anchor="middle" fill="white" font-size="11" font-weight="bold" font-family="sans-serif">Y</text></svg>
+    </div>
+    <div class="proof-text">
       <div class="proof-label">Hacker News</div>
-      <div class="proof-sub">161 points · 49 comments</div>
+      <div class="proof-sub">161 points &middot; 49 comments</div>
     </div>
   </div>
+
+  <div class="proof-divider"></div>
+
   <div class="proof-item">
-    <span class="proof-icon">🐱</span>
-    <div>
+    <div class="proof-icon-wrap proof-ph">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect width="16" height="16" rx="2" fill="#da5126"/><text x="8" y="12" text-anchor="middle" fill="white" font-size="10" font-weight="bold" font-family="sans-serif">PH</text></svg>
+    </div>
+    <div class="proof-text">
       <div class="proof-label">Product Hunt</div>
       <div class="proof-sub">382 upvotes</div>
+    </div>
+  </div>
+
+  <div class="proof-divider"></div>
+
+  <div class="proof-item">
+    <div class="proof-icon-wrap proof-gh">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--text)"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+    </div>
+    <div class="proof-text">
+      <div class="proof-label">Open Source</div>
+      <div class="proof-sub" id="star-proof">MIT License</div>
     </div>
   </div>
 </div>
 
 <!-- ── Features ──────────────────────────────────────────────────────── -->
 <section id="features">
-  <p class="section-eyebrow reveal">Why it works</p>
-  <h2 class="section-title reveal">Built the right way.</h2>
-  <p class="section-sub reveal">No bloat. No extensions. No copy-pasting tokens. Just your usage, always visible.</p>
+  <p class="section-label reveal">Features</p>
+  <h2 class="section-title reveal">No bloat. No extensions.<br>Just your usage, always visible.</h2>
+  <p class="section-desc reveal">Built to do one thing well and get out of your way.</p>
 
   <div class="feature-grid">
     <div class="feature-card reveal">
-      <div class="feature-icon icon-orange">🔍</div>
+      <div class="feature-icon icon-orange">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--claude)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
       <h3>Auto-detects your browser</h3>
-      <p>Reads existing session cookies from Chrome, Arc, Firefox, Brave, Edge, or Safari. Nothing to configure — it just works from the first launch.</p>
+      <p>Reads existing session cookies from your browser. Nothing to configure -- it just works from the first launch.</p>
       <div class="feature-tags">
         <span class="tag">Chrome</span>
         <span class="tag">Arc</span>
         <span class="tag">Firefox</span>
         <span class="tag">Brave</span>
         <span class="tag">Safari</span>
+        <span class="tag">Edge</span>
       </div>
     </div>
 
-    <div class="feature-card reveal reveal-delay-1">
-      <div class="feature-icon icon-green">⚡</div>
+    <div class="feature-card reveal reveal-d1">
+      <div class="feature-icon icon-green">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      </div>
       <h3>Claude + ChatGPT in one place</h3>
-      <p>Session limits, weekly caps, Sonnet-only quotas, ChatGPT usage — all in a single menu. Reset times shown in plain language.</p>
+      <p>Session limits, weekly caps, Sonnet quotas, ChatGPT usage -- all in a single dropdown. Reset times in plain language.</p>
       <div class="feature-tags">
         <span class="tag">5h session</span>
         <span class="tag">Weekly limits</span>
@@ -907,15 +923,16 @@
       </div>
     </div>
 
-    <div class="feature-card reveal reveal-delay-2">
-      <div class="feature-icon icon-blue">🍎</div>
+    <div class="feature-card reveal reveal-d2">
+      <div class="feature-icon icon-blue">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </div>
       <h3>Truly native macOS</h3>
-      <p>~900 lines of Python. Runs as a LaunchAgent. Starts at login. Tiny memory footprint. No Electron, no bundled browser, no background services.</p>
+      <p>~900 lines of Python. Runs as a LaunchAgent. Starts at login. Tiny footprint. No Electron, no bundled browser.</p>
       <div class="feature-tags">
         <span class="tag">LaunchAgent</span>
         <span class="tag">No Electron</span>
         <span class="tag">MIT License</span>
-        <span class="tag">Open Source</span>
       </div>
     </div>
   </div>
@@ -923,42 +940,41 @@
 
 <!-- ── How it works ──────────────────────────────────────────────────── -->
 <section id="how">
-  <p class="section-eyebrow reveal">Setup</p>
-  <h2 class="section-title reveal">Three steps, then forget about it.</h2>
-  <p class="section-sub reveal">The whole point is that you shouldn't have to think about this.</p>
+  <p class="section-label reveal">Setup</p>
+  <h2 class="section-title reveal">Three steps. Then forget about it.</h2>
+  <p class="section-desc reveal">The whole point is you should never have to think about this.</p>
 
   <div class="steps">
     <div class="step reveal">
-      <div class="step-num">⬇️</div>
+      <div class="step-num">1</div>
       <h3>Run one command</h3>
-      <p>Paste into Terminal. Python and dependencies install automatically.</p>
-      <div class="step-code">curl -fsSL …/install.sh | bash</div>
+      <p>Paste into Terminal. Python and all dependencies install automatically.</p>
+      <div class="step-code">curl -fsSL .../install.sh | bash</div>
     </div>
-    <div class="step reveal reveal-delay-1">
-      <div class="step-num">🔍</div>
+    <div class="step reveal reveal-d1">
+      <div class="step-num">2</div>
       <h3>Browser session detected</h3>
-      <p>The app reads your existing Claude.ai session from your browser. No login, no tokens.</p>
+      <p>Reads your existing Claude.ai session from your browser. No login, no tokens.</p>
     </div>
-    <div class="step reveal reveal-delay-2">
-      <div class="step-num">🟢</div>
+    <div class="step reveal reveal-d2">
+      <div class="step-num">3</div>
       <h3>Usage appears in menu bar</h3>
-      <p>A color-coded percentage shows up immediately. Updates every 5 minutes automatically.</p>
+      <p>A color-coded percentage shows up immediately. Updates every 5 minutes.</p>
     </div>
   </div>
 </section>
 
-
-<!-- ── Install ───────────────────────────────────────────────────────── -->
+<!-- ── Install ──────────────────────────────────────────────────────── -->
 <section id="install">
-  <p class="section-eyebrow reveal">Install</p>
-  <h2 class="section-title reveal">Get started in seconds.</h2>
-  <p class="section-sub reveal">Two ways to install. Both take under a minute.</p>
+  <p class="section-label reveal">Install</p>
+  <h2 class="section-title reveal">Up and running in seconds.</h2>
+  <p class="section-desc reveal">Two ways to install. Both take under a minute.</p>
 
   <div class="install-grid">
     <div class="install-card reveal">
       <div class="install-card-header">
         <span class="install-label">One-liner</span>
-        <span class="badge-recommended">Recommended</span>
+        <span class="badge badge-green">Recommended</span>
       </div>
       <div class="install-terminal terminal">
         <div class="terminal-chrome">
@@ -974,10 +990,10 @@
       </div>
     </div>
 
-    <div class="install-card reveal reveal-delay-1">
+    <div class="install-card reveal reveal-d1">
       <div class="install-card-header">
         <span class="install-label">Homebrew</span>
-        <span class="badge-tap">Tap</span>
+        <span class="badge badge-blue">Tap</span>
       </div>
       <div class="install-terminal terminal">
         <div class="terminal-chrome">
@@ -996,50 +1012,82 @@ aiquotabar &</span>
     </div>
   </div>
 
-  <p style="font-size:13px;color:var(--text-3);margin-top:20px;" class="reveal">
-    Requires macOS 12+ and Python 3.10+. No Electron. No accounts.
+  <p class="install-note reveal">
+    Requires macOS 12+ and Python 3.10+. No Electron. No account needed.
   </p>
 </section>
 
-<!-- ── CTA ───────────────────────────────────────────────────────────── -->
+<!-- ── CTA ──────────────────────────────────────────────────────────── -->
 <section id="cta">
-  <h2 class="reveal">Open source.<br>Star it on GitHub.</h2>
-  <p class="reveal">Featured on Hacker News (161 points) and Product Hunt (382 upvotes).</p>
-  <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" class="btn-github reveal">
-    <svg viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
-    <span class="star-icon">⭐</span>
-    View on GitHub
-  </a>
+  <div class="cta-box reveal">
+    <h2>Never get blindsided by<br>your AI quota again.</h2>
+    <p>Join hundreds of developers who track their Claude and ChatGPT usage from the menu bar. Star the repo to stay updated.</p>
+    <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" rel="noopener" class="btn-star">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/></svg>
+      Star on GitHub
+    </a>
+  </div>
 </section>
 
-<!-- ── Footer ────────────────────────────────────────────────────────── -->
+<!-- ── Footer ─────────────────────────────────────────────────────────── -->
 <footer>
-  <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank">AIQuotaBar</a>
-  · MIT License
-  · Not affiliated with Anthropic or OpenAI
+  <a href="https://github.com/yagcioglutoprak/AIQuotaBar" target="_blank" rel="noopener">AIQuotaBar</a>
+  &middot; MIT License
+  &middot; Not affiliated with Anthropic or OpenAI
 </footer>
 
 <script>
-  // Copy to clipboard
+  // Install command text
+  var INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash';
+
+  // Copy terminal command by element ID
   function copyCmd(id, btn) {
-    const text = document.getElementById(id).textContent.trim();
-    navigator.clipboard.writeText(text).then(() => {
-      btn.textContent = '✓ Copied';
+    var text = document.getElementById(id).textContent.trim();
+    navigator.clipboard.writeText(text).then(function() {
+      btn.textContent = 'Copied!';
       btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2000);
+      setTimeout(function() { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 2200);
     });
   }
 
-  // Scroll reveal
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); } });
-  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  // Copy install command from hero button
+  function copyInstall(btn) {
+    navigator.clipboard.writeText(INSTALL_CMD).then(function() {
+      var original = btn.innerHTML;
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Copied to clipboard!';
+      setTimeout(function() { btn.innerHTML = original; }, 2200);
+    });
+  }
 
-  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+  // Fetch GitHub star count
+  (function() {
+    fetch('https://api.github.com/repos/yagcioglutoprak/AIQuotaBar')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.stargazers_count) {
+          var count = d.stargazers_count;
+          var display = count >= 1000 ? (count / 1000).toFixed(1) + 'k' : count;
+          var el = document.getElementById('star-count');
+          if (el) el.textContent = display;
+          var proofEl = document.getElementById('star-proof');
+          if (proofEl) proofEl.textContent = display + ' stars on GitHub';
+        }
+      })
+      .catch(function() {});
+  })();
 
-  // Reveal hero immediately
-  document.querySelectorAll('#hero .reveal').forEach((el, i) => {
-    setTimeout(() => el.classList.add('visible'), i * 120);
+  // Intersection observer for scroll reveal
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) e.target.classList.add('visible');
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -30px 0px' });
+
+  document.querySelectorAll('.reveal').forEach(function(el) { observer.observe(el); });
+
+  // Reveal hero elements immediately with staggered timing
+  document.querySelectorAll('#hero > .reveal').forEach(function(el, i) {
+    setTimeout(function() { el.classList.add('visible'); }, i * 100);
   });
 </script>
 

@@ -54,6 +54,12 @@ DEFAULT_REFRESH = 300
 WARN_THRESHOLD = 80   # notify when any limit crosses this %
 CRIT_THRESHOLD = 95   # title turns red emoji above this %
 
+WIDGET_HOST_APP = "/Applications/AIQuotaBarHost.app"
+WIDGET_CACHE_DIR = os.path.expanduser(
+    "~/Library/Application Support/AIQuotaBar"
+)
+WIDGET_CACHE_FILE = os.path.join(WIDGET_CACHE_DIR, "usage.json")
+
 # ── notification defaults ─────────────────────────────────────────────────────
 # Keys stored in config under "notifications": { key: bool }
 _NOTIF_DEFAULTS = {
@@ -67,14 +73,24 @@ _NOTIF_DEFAULTS = {
 
 def load_config() -> dict:
     if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
+        try:
+            with open(CONFIG_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            corrupt = CONFIG_FILE + ".bak"
+            log.warning("Config file corrupt (%s), resetting. Backup at %s", e, corrupt)
+            try:
+                os.replace(CONFIG_FILE, corrupt)
+            except OSError:
+                pass
     return {}
 
 
 def save_config(cfg: dict):
-    with open(CONFIG_FILE, "w") as f:
+    tmp = CONFIG_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(cfg, f, indent=2)
+    os.replace(tmp, CONFIG_FILE)
 
 
 def _notif_enabled(cfg: dict, key: str) -> bool:
@@ -421,8 +437,8 @@ def _row(data: dict, key: str, label: str) -> LimitRow | None:
     if not bucket or not isinstance(bucket, dict):
         return None
     raw = float(bucket.get("utilization", 0))
-    # API is inconsistent: five_hour returns 0-1 fraction, weekly returns 0-100 percentage
-    pct = min(100, round(raw if raw > 1.0 else raw * 100))
+    # API returns 0-100 percentage for all fields (five_hour, seven_day, etc.)
+    pct = min(100, round(raw))
     reset = _fmt_reset(bucket.get("resets_at"))
     return LimitRow(label, pct, reset)
 
@@ -532,6 +548,251 @@ def fetch_claude_code_stats() -> dict | None:
     except Exception as e:
         log.debug("fetch_claude_code_stats failed: %s", e)
         return None
+
+
+def _write_widget_cache(
+    data: UsageData,
+    providers: list[ProviderData],
+    cc_stats: dict | None,
+) -> None:
+    """Write current usage snapshot for the WidgetKit widget.
+
+    Writes to ~/Library/Group Containers/group.com.aiquotabar/usage.json
+    using atomic replace so the widget never reads a partial file.
+    Failures are logged but never crash the main app.
+    """
+    try:
+        def _row_dict(row: LimitRow | None) -> dict | None:
+            if row is None:
+                return None
+            return {"label": row.label, "pct": row.pct, "reset_str": row.reset_str}
+
+        # ChatGPT rows
+        chatgpt_pd = next((p for p in providers if p.name == "ChatGPT"), None)
+        chatgpt_rows = None
+        chatgpt_error = None
+        if chatgpt_pd:
+            if chatgpt_pd.error:
+                chatgpt_error = chatgpt_pd.error
+            else:
+                raw_rows = getattr(chatgpt_pd, "_rows", None) or []
+                chatgpt_rows = [_row_dict(r) for r in raw_rows]
+
+        payload = {
+            "version": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "claude": {
+                "session": _row_dict(data.session),
+                "weekly_all": _row_dict(data.weekly_all),
+                "weekly_sonnet": _row_dict(data.weekly_sonnet),
+                "overages_enabled": data.overages_enabled,
+            },
+            "chatgpt": {
+                "rows": chatgpt_rows,
+                "error": chatgpt_error,
+            },
+            "claude_code": {
+                "today_messages": (cc_stats or {}).get("today_messages", 0),
+                "week_messages": (cc_stats or {}).get("week_messages", 0),
+            },
+        }
+
+        os.makedirs(WIDGET_CACHE_DIR, exist_ok=True)
+        tmp = os.path.join(WIDGET_CACHE_DIR, ".usage.json.tmp")
+        with open(tmp, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp, WIDGET_CACHE_FILE)
+        log.debug("widget cache written: %s", WIDGET_CACHE_FILE)
+
+        # Nudge WidgetKit to reload (non-blocking, best-effort)
+        subprocess.Popen(
+            ["open", "-g", "-a", "AIQuotaBarHost", "--args", "--reload-widget"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        log.debug("_write_widget_cache failed", exc_info=True)
+
+
+def _is_widget_installed() -> bool:
+    """Check if the AIQuotaBarHost widget app is installed."""
+    return os.path.isdir(WIDGET_HOST_APP)
+
+
+def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
+    """Show a native macOS welcome window with an animated GIF and info text."""
+    from AppKit import (
+        NSWindow, NSImageView, NSImage, NSTextField, NSButton, NSFont,
+        NSMakeRect, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
+        NSWindowStyleMaskFullSizeContentView,
+        NSBackingStoreBuffered, NSTextAlignmentCenter,
+        NSColor, NSBezelStyleRounded,
+        NSApplication, NSFloatingWindowLevel, NSScreen,
+        NSVisualEffectView, NSView, NSBezierPath,
+        NSCompositingOperationSourceOver,
+    )
+    import Quartz
+
+    PAD = 28          # horizontal padding
+    WIN_W = 560       # narrower, more focused
+    GIF_W = WIN_W - PAD * 2
+    TEXT_AREA_H = 200
+    BTN_AREA_H = 56
+
+    # Get GIF dimensions for proper aspect ratio
+    img = NSImage.alloc().initWithContentsOfFile_(gif_path)
+    if img:
+        iw, ih = img.size().width, img.size().height
+        GIF_H = int(GIF_W * ih / iw) if iw > 0 else 280
+    else:
+        GIF_H = 280
+
+    WIN_H = GIF_H + TEXT_AREA_H + BTN_AREA_H + PAD * 3
+
+    # Centre on screen
+    screen = NSScreen.mainScreen().frame()
+    x = (screen.size.width - WIN_W) / 2
+    y = (screen.size.height - WIN_H) / 2
+
+    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        NSMakeRect(x, y, WIN_W, WIN_H),
+        (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+         | NSWindowStyleMaskFullSizeContentView),
+        NSBackingStoreBuffered,
+        False,
+    )
+    win.setTitle_("")
+    win.setTitlebarAppearsTransparent_(True)
+    win.setTitleVisibility_(1)  # NSWindowTitleHidden
+    win.setLevel_(NSFloatingWindowLevel)
+    win.setMovableByWindowBackground_(True)
+
+    content = win.contentView()
+    content.setWantsLayer_(True)
+
+    # ── Vibrancy background ──
+    blur = NSVisualEffectView.alloc().initWithFrame_(content.bounds())
+    blur.setAutoresizingMask_(18)  # width + height
+    blur.setBlendingMode_(0)       # NSVisualEffectBlendingModeBehindWindow
+    blur.setMaterial_(3)           # NSVisualEffectMaterialHUDWindow
+    blur.setState_(1)              # NSVisualEffectStateActive
+    content.addSubview_(blur)
+
+    y_pos = WIN_H  # start from top, go down
+
+    # ── Title ──
+    y_pos -= 52
+    title = NSTextField.alloc().initWithFrame_(
+        NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 28)
+    )
+    title.setStringValue_("Welcome to AIQuotaBar")
+    title.setBezeled_(False)
+    title.setDrawsBackground_(False)
+    title.setEditable_(False)
+    title.setSelectable_(False)
+    title.setAlignment_(NSTextAlignmentCenter)
+    title.setFont_(NSFont.systemFontOfSize_weight_(20, 0.56))  # semibold
+    content.addSubview_(title)
+
+    # ── Subtitle ──
+    y_pos -= 22
+    sub = NSTextField.alloc().initWithFrame_(
+        NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 18)
+    )
+    sub.setStringValue_("Monitor your Claude and ChatGPT usage limits in real time.")
+    sub.setBezeled_(False)
+    sub.setDrawsBackground_(False)
+    sub.setEditable_(False)
+    sub.setSelectable_(False)
+    sub.setAlignment_(NSTextAlignmentCenter)
+    sub.setFont_(NSFont.systemFontOfSize_(12))
+    sub.setTextColor_(NSColor.secondaryLabelColor())
+    content.addSubview_(sub)
+
+    # ── GIF in a rounded container ──
+    y_pos -= (GIF_H + 16)
+    gif_container = NSView.alloc().initWithFrame_(
+        NSMakeRect(PAD, y_pos, GIF_W, GIF_H)
+    )
+    gif_container.setWantsLayer_(True)
+    gif_container.layer().setCornerRadius_(12)
+    gif_container.layer().setMasksToBounds_(True)
+    gif_container.layer().setBorderWidth_(0.5)
+    gif_container.layer().setBorderColor_(
+        Quartz.CGColorCreateGenericRGB(1, 1, 1, 0.08)
+    )
+    content.addSubview_(gif_container)
+
+    if img:
+        img_view = NSImageView.alloc().initWithFrame_(
+            NSMakeRect(0, 0, GIF_W, GIF_H)
+        )
+        img_view.setImage_(img)
+        img_view.setAnimates_(True)
+        img_view.setImageScaling_(3)  # NSImageScaleProportionallyDown
+        img_view.setImageAlignment_(0)  # NSImageAlignCenter
+        # Disable interpolation artifacts
+        img_view.setWantsLayer_(True)
+        img_view.layer().setMagnificationFilter_(Quartz.kCAFilterTrilinear)
+        img_view.layer().setMinificationFilter_(Quartz.kCAFilterTrilinear)
+        gif_container.addSubview_(img_view)
+
+    # ── Info rows ──
+    y_pos -= 20
+    rows = [
+        ("Menu Bar",
+         "Click the diamond icon to see session limits, weekly caps, and reset times."),
+        ("Desktop Widget",
+         "Installed and synced. Right-click desktop > Edit Widgets > 'AI Quota'."
+         if widget_installed else
+         "Available to install. Check 'Desktop Widget' in the menu bar."),
+        ("Auto Refresh",
+         "Data updates every 60 seconds. Alerts at 80% and 95% usage."),
+    ]
+    for heading, desc in rows:
+        y_pos -= 22
+        h_lbl = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 16)
+        )
+        h_lbl.setStringValue_(heading)
+        h_lbl.setBezeled_(False)
+        h_lbl.setDrawsBackground_(False)
+        h_lbl.setEditable_(False)
+        h_lbl.setSelectable_(False)
+        h_lbl.setFont_(NSFont.systemFontOfSize_weight_(12, 0.4))  # medium
+        content.addSubview_(h_lbl)
+
+        y_pos -= 16
+        d_lbl = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 14)
+        )
+        d_lbl.setStringValue_(desc)
+        d_lbl.setBezeled_(False)
+        d_lbl.setDrawsBackground_(False)
+        d_lbl.setEditable_(False)
+        d_lbl.setSelectable_(False)
+        d_lbl.setFont_(NSFont.systemFontOfSize_(11))
+        d_lbl.setTextColor_(NSColor.secondaryLabelColor())
+        content.addSubview_(d_lbl)
+
+        y_pos -= 10  # spacing between rows
+
+    # ── "Got it" button (macOS accent-colored) ──
+    btn_w, btn_h = 120, 30
+    btn = NSButton.alloc().initWithFrame_(
+        NSMakeRect((WIN_W - btn_w) / 2, 18, btn_w, btn_h)
+    )
+    btn.setTitle_("Got it")
+    btn.setBezelStyle_(NSBezelStyleRounded)
+    btn.setKeyEquivalent_("\r")  # Enter key dismisses
+    btn.setAction_(b"performClose:")
+    btn.setTarget_(win)
+    content.addSubview_(btn)
+
+    win.makeKeyAndOrderFront_(None)
+    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+
+    # Keep reference so ARC doesn't collect the window
+    _show_welcome_window._active_win = win
 
 
 def _fmt_count(n: int) -> str:
@@ -692,6 +953,7 @@ def _add_login_item():
     )
     # Use launchctl + a plist for reliability
     plist = os.path.expanduser("~/Library/LaunchAgents/com.claudebar.plist")
+    python_exe = sys.executable
     content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -700,7 +962,7 @@ def _add_login_item():
     <string>com.claudebar</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>{python_exe}</string>
         <string>{path}</string>
     </array>
     <key>RunAtLoad</key>
@@ -911,6 +1173,10 @@ class ClaudeBar(rumps.App):
         self._ui_ticker = rumps.Timer(self._flush_ui, 0.25)
         self._ui_ticker.start()
 
+        # Deferred startup info (runs after the run loop is active)
+        self._welcome_timer = rumps.Timer(self._deferred_welcome, 2)
+        self._welcome_timer.start()
+
         # Always try to fetch on startup — browser JS works even without saved cookies
         self._schedule_fetch()
 
@@ -1053,6 +1319,19 @@ class ClaudeBar(rumps.App):
         login_item._menuitem.setState_(1 if _is_login_item() else 0)
         items.append(login_item)
 
+        # Desktop Widget status
+        if _is_widget_installed():
+            widget_item = rumps.MenuItem(
+                "Desktop Widget  ✓  Installed",
+                callback=self._open_widget_settings,
+            )
+        else:
+            widget_item = rumps.MenuItem(
+                "Desktop Widget  ·  Not Installed",
+                callback=self._install_widget_prompt,
+            )
+        items.append(widget_item)
+
         items.append(None)
         items.append(rumps.MenuItem("Quit", callback=rumps.quit_application))
 
@@ -1082,6 +1361,90 @@ class ClaudeBar(rumps.App):
             self._apply(data)
         elif title is not None:
             self.title = title
+
+    # ── widget ─────────────────────────────────────────────────────────────────
+
+    def _deferred_welcome(self, _timer):
+        """Runs once after the run loop is active, then stops itself."""
+        _timer.stop()
+        self._check_widget_status()
+
+    def _check_widget_status(self):
+        """Show startup info about what the app is doing."""
+        seen_welcome = self.config.get("seen_welcome", False)
+        widget_ok = _is_widget_installed()
+
+        if not seen_welcome:
+            # First launch — show native welcome window with GIF
+            gif_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "assets", "widget_info.gif",
+            )
+            if os.path.isfile(gif_path):
+                _show_welcome_window(gif_path, widget_ok)
+            else:
+                # Fallback to notification if GIF missing
+                rumps.notification(
+                    title="Welcome to AIQuotaBar",
+                    subtitle="Monitoring Claude + ChatGPT usage",
+                    message="Click the diamond in your menu bar to get started.",
+                    sound=True,
+                )
+            self.config["seen_welcome"] = True
+            save_config(self.config)
+        else:
+            # Subsequent launches — brief notification
+            if widget_ok:
+                rumps.notification(
+                    title="AIQuotaBar",
+                    subtitle="Running",
+                    message="Menu bar and desktop widget are synced.",
+                    sound=False,
+                )
+            else:
+                rumps.notification(
+                    title="AIQuotaBar",
+                    subtitle="Running",
+                    message=(
+                        "Tracking usage from your menu bar. "
+                        "A desktop widget is also available — check the menu."
+                    ),
+                    sound=False,
+                )
+
+    def _open_widget_settings(self, _sender):
+        """Open the widget host app (shows add-widget instructions)."""
+        subprocess.Popen(
+            ["open", "-a", "AIQuotaBarHost"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
+    def _install_widget_prompt(self, _sender):
+        """Show instructions for building/installing the widget."""
+        widget_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "AIQuotaBarWidget"
+        )
+        if os.path.isdir(widget_dir):
+            build_script = os.path.join(widget_dir, "build_widget.sh")
+            if os.path.isfile(build_script):
+                rumps.alert(
+                    title="Install Desktop Widget",
+                    message=(
+                        "To install the desktop widget, run in Terminal:\n\n"
+                        f"cd {widget_dir}\n"
+                        "./build_widget.sh\n\n"
+                        "Then right-click desktop → Edit Widgets → search 'AI Quota'."
+                    ),
+                )
+                return
+        rumps.alert(
+            title="Desktop Widget Not Found",
+            message=(
+                "The widget project was not found.\n\n"
+                "Make sure the AIQuotaBarWidget folder exists "
+                "in the AIQuotaBar directory."
+            ),
+        )
 
     # ── fetch ─────────────────────────────────────────────────────────────────
 
@@ -1119,9 +1482,11 @@ class ClaudeBar(rumps.App):
             self._check_provider_warnings(self._provider_data)
             self._cc_stats = fetch_claude_code_stats()
             self._post_data(data)          # ← main thread applies title + menu
+            _write_widget_cache(data, self._provider_data, self._cc_stats)
         except CurlHTTPError as e:
-            code = getattr(e, "code", 0) or 0
-            log.error("HTTP error: %s", e, exc_info=True)
+            resp = getattr(e, "response", None)
+            code = getattr(resp, "status_code", 0) or 0
+            log.error("HTTP error: %s (status=%s)", e, code, exc_info=True)
             if code in (401, 403):
                 self._auth_fail_count += 1
                 self._post_title("◆ !")

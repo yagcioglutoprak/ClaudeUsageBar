@@ -1,26 +1,17 @@
-# Claude Usage Bar
+# AIQuotaBar
 
-**See your Claude.ai and ChatGPT usage limits live in your macOS menu bar.**
+**Stop getting rate-limited by surprise.** See your Claude and ChatGPT usage live in the macOS menu bar.
 
 No Electron. No browser extension. One command to install.
 
-![Claude Usage Bar demo](assets/demo.gif)
+![AIQuotaBar demo](assets/demo.gif)
 
-[![macOS](https://img.shields.io/badge/macOS-12%2B-black?logo=apple)](https://www.apple.com/macos/)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/yagcioglutoprak/AIQuotaBar?style=social)](https://github.com/yagcioglutoprak/AIQuotaBar/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/yagcioglutoprak/AIQuotaBar/total)](https://github.com/yagcioglutoprak/AIQuotaBar/releases)
 [![Latest Release](https://img.shields.io/github/v/release/yagcioglutoprak/AIQuotaBar)](https://github.com/yagcioglutoprak/AIQuotaBar/releases/latest)
-[![Last Commit](https://img.shields.io/github/last-commit/yagcioglutoprak/AIQuotaBar)](https://github.com/yagcioglutoprak/AIQuotaBar/commits/main)
 
 **Featured on Hacker News (161 points, 49 comments) · Product Hunt (382 upvotes)**
-
----
-
-## Why I built this
-
-I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall. Same with ChatGPT. So I built a tiny menu bar app that shows both.
 
 ---
 
@@ -39,6 +30,12 @@ aiquotabar &
 ```
 
 The app launches immediately and auto-detects your Claude session from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
+
+---
+
+### Why I built this
+
+I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall. Same with ChatGPT. So I built a tiny menu bar app that shows both.
 
 ---
 
@@ -81,10 +78,33 @@ CHATGPT
 
 ---
 
+## Desktop Widget (NEW)
+
+Native macOS WidgetKit widget — see your Claude and ChatGPT usage right on your desktop or in Notification Center.
+
+![Desktop Widget](assets/widget_info.gif)
+
+**Small widget:** Claude + ChatGPT percentages at a glance, color-coded by brand.
+
+**Medium widget:** Side-by-side breakdown with session limits, weekly caps, progress bars, and reset times.
+
+The widget syncs automatically with the menu bar app — no extra setup. Data updates every 60 seconds.
+
+```bash
+# Build the widget (requires Xcode)
+cd AIQuotaBarWidget && ./build_widget.sh
+# Then: right-click desktop → Edit Widgets → search "AI Quota"
+```
+
+> The widget is entirely optional — the menu bar app works without it. Requires macOS 14+ and Xcode 15+.
+
+---
+
 ## Features
 
 - **Zero-setup auth** — reads cookies directly from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
 - **Claude + ChatGPT** — tracks both Claude.ai session/weekly limits and ChatGPT usage in one place
+- **Desktop widget** — native macOS WidgetKit widget with brand-colored progress bars
 - **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside usage
 - **Auto-refresh on session expiry** — silently grabs fresh cookies when your session expires
 - **macOS notifications** — alerts at 80% and 95% usage
@@ -98,9 +118,10 @@ CHATGPT
 
 | | AIQuotaBar | Open settings page | Browser extension |
 |---|---|---|---|
-| Always visible | ✅ Menu bar | ❌ Manual tab switch | ⚠️ Badge only |
+| Always visible | ✅ Menu bar + desktop widget | ❌ Manual tab switch | ⚠️ Badge only |
 | Notifications | ✅ 80% + 95% | ❌ None | ⚠️ Varies |
 | Claude + ChatGPT | ✅ Both in one place | ❌ One at a time | ❌ |
+| Desktop widget | ✅ Native WidgetKit | ❌ | ❌ |
 | Privacy | ✅ Local only | ✅ | ⚠️ Depends on extension |
 | Install | ✅ One command | ✅ Nothing | ❌ Store + permissions |
 | No Electron | ✅ ~900 lines Python | ✅ | ❌ Often Electron |
@@ -160,6 +181,7 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 ## Roadmap
 
 - [x] Homebrew tap (`brew tap yagcioglutoprak/aiquotabar && brew install --HEAD aiquotabar`)
+- [x] Native macOS desktop widget (WidgetKit)
 - [ ] Linux system tray support
 - [ ] Windows tray app
 - [ ] Customizable notification thresholds
@@ -170,17 +192,7 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 ## Contributing
 
-PRs welcome. Open an issue first for large changes.
-
-To run in development:
-```bash
-git clone https://github.com/yagcioglutoprak/AIQuotaBar.git
-cd AIQuotaBar
-pip install -r requirements.txt
-python3 claude_bar.py
-```
-
-Logs are written to `~/.claude_bar.log`.
+PRs welcome. Open an issue first for large changes. See [Manual install](#manual-install) for dev setup. Logs: `~/.claude_bar.log`.
 
 ---
 

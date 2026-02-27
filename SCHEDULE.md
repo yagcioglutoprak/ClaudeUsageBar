@@ -9,24 +9,117 @@
 
 | Date | Platform | Status | Notes |
 |------|----------|--------|-------|
-| 2026-02-26 | Hacker News | 🔄 Live (1pt) | Posted, needs comments |
+| 2026-02-26 | Hacker News | ⚠️ Live (1pt, DEAD) | Missing "Show HN:" prefix — can't fix. 1 self-comment only. |
 | 2026-02-26 | r/ClaudeAI | ❌ Rejected | Repost with fixed version below (wait 1h) |
-| 2026-02-26 | awesome-mac PR #1833 | 🔄 Open | Waiting on FOSSA license scan + maintainer |
-| 2026-02-26 | open-source-mac-os-apps PR #1041 | 🔄 Open | Waiting on maintainer workflow approval |
-| 2026-02-26 | awesome-claude PR #60 | 🔄 Open | tonysurfly/awesome-claude |
+| 2026-02-26 | awesome-mac PR #1833 | 🔄 Open | jaywcjlove/awesome-mac (99k⭐) — waiting on maintainer |
+| 2026-02-26 | open-source-mac-os-apps PR #1041 | 🔄 Open | serhii-londar (47k⭐) — waiting on maintainer |
+| 2026-02-26 | awesome-claude PR #60 | 🔄 Open | tonysurfly/awesome-claude (1.1k⭐) — waiting on maintainer |
 | 2026-02-26 | jqueryscript/awesome-claude-code PR #51 | 🔄 Open | Waiting on maintainer |
 | 2026-02-26 | GitHub Pages | ✅ Live | https://yagcioglutoprak.github.io/AIQuotaBar/ |
-| 2026-02-27 | r/MacApps | ⏳ Pending | |
-| 2026-02-27 | r/ChatGPT | ⏳ Pending | Post a few hours after r/MacApps |
-| 2026-02-28 | awesome-claude-code | ⚠️ Manual only | 2-day cooldown expires — MUST submit via browser (see section below) |
+| 2026-02-27 | r/MacApps | ⏳ Pending | YOU must post — Reddit blocked in automation |
+| 2026-02-27 | r/ChatGPT | ⏳ Pending | YOU must post — a few hours after r/MacApps |
+| 2026-02-27 | r/ClaudeAI retry | ⏳ Pending | YOU must post — fixed copy in this doc |
+| 2026-02-28 | awesome-claude-code | ⚠️ Manual only | Cooldown expires — submit via browser (see section below) |
 | 2026-02-28 | r/Python | ⏳ Pending | Technical angle |
 | 2026-02-28 | r/macOS | ⏳ Pending | |
+| 2026-02-28 | Product Hunt | ⏳ NOT submitted | YOU must submit — not in system, huge opportunity (see section below) |
+| 2026-02-26 | AlternativeTo | ✅ Listed | https://alternativeto.net/software/aiquotabar/about/ |
 | 2026-03-01 | r/ClaudeCode | ⏳ Pending | |
 | 2026-03-01 | r/OpenAI | ⏳ Pending | |
+| 2026-02-26 | dev.to post | ✅ Published | https://dev.to/yagcioglutoprak/i-built-a-macos-menu-bar-app-in-900-lines-of-python-that-tracks-claude-chatgpt-limits-heres-5he7 |
+| 2026-03-01 | Indie Hackers | ❌ Blocked | New accounts can't post — need comment karma first. Earn by commenting on posts. |
 | 2026-03-02 | Twitter/X thread | ⏳ Pending | Tag @AnthropicAI @swyx @levelsio @nutlope |
+| 2026-03-02 | Anthropic Discord | ⏳ NOT done | #community-projects or #showcase — copy in POST_PLAN.md |
 | When 225 ⭐ | homebrew-core PR | ⏳ Waiting | Formula is ready, just resubmit |
 
 **Best posting time for all platforms:** Tuesday–Thursday, 9–11 AM EST
+
+---
+
+## 🚨 Product Hunt — NOT SUBMITTED (submit 2026-02-28, Tuesday 12:01 AM PST)
+
+**Product Hunt launches reset at 12:01 AM PST daily. Submit Tuesday for max exposure.**
+**Must be logged in — go to producthunt.com/posts/new**
+
+| Field | Value |
+|-------|-------|
+| Name | `AIQuotaBar` |
+| Tagline | `Claude + ChatGPT usage limits in your macOS menu bar` |
+| Description | `Stop getting blindsided by AI rate limits. AIQuotaBar shows live Claude session/weekly usage and ChatGPT limits as a color-coded indicator in your macOS menu bar. Zero setup — reads your existing browser cookies from Chrome, Arc, Firefox, or Safari. One-command install. MIT licensed.` |
+| Website | `https://github.com/yagcioglutoprak/AIQuotaBar` |
+| Topics | `Developer Tools`, `Productivity`, `Artificial Intelligence`, `Mac` |
+| Maker comment | `I built this after Claude Pro cut me off mid-session three times in one week with zero warning. The settings page exists but nobody checks it proactively. This auto-detects your browser session so there's nothing to configure — just install and it shows up in your menu bar. Happy to answer questions!` |
+
+---
+
+## ✅ AlternativeTo — LISTED
+
+**URL:** https://alternativeto.net/software/aiquotabar/about/
+Listed 2026-02-26.
+
+---
+
+## 🆕 dev.to — Post (2026-03-01)
+
+**Title:**
+```
+Show HN: I built a macOS menu bar app in ~900 lines of Python that tracks Claude + ChatGPT limits — here's how
+```
+
+**Tags:** `python`, `macos`, `claude`, `openai`
+
+**Body (technical angle):**
+```markdown
+I got tired of getting blindsided by Claude Pro rate limits mid-session. The solution: a menu bar app that reads the same private API that claude.ai/settings/usage calls.
+
+Here's what made it interesting to build:
+
+## The Cloudflare problem
+Claude's API is behind Cloudflare. Regular `requests` or `httpx` get 403'd immediately. The fix: `curl_cffi` with `impersonate="chrome131"` to spoof the TLS fingerprint. This was the single biggest hurdle.
+
+## Browser cookie detection
+Rather than making users copy-paste cookies, I used `browser-cookie3` to read them directly from Chrome, Arc, Firefox, Safari, or Brave. Key insight: **try Firefox first** — it uses a plain SQLite database with no Keychain prompt. Chromium browsers need a one-time "Always Allow" dialog.
+
+## AppKit threading rule
+`rumps` runs on the main thread. All UI updates (menu rebuilds) must happen there. My background fetch thread puts results in a `queue.Queue`, and a 0.25-second timer on the main thread drains it. Violate this and you get intermittent crashes.
+
+## Inconsistent API scale
+The API returns `five_hour` (session) as a 0–1 fraction, but `seven_day` (weekly) as a 0–100 percentage. The fix: `if raw > 1.0: already_pct else multiply_by_100`. Spent embarrassing time debugging this.
+
+## One-line install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
+```
+
+MIT licensed, ~900 lines Python: https://github.com/yagcioglutoprak/AIQuotaBar
+
+Happy to go deep on any of these implementation details in the comments.
+```
+
+---
+
+## 🆕 Indie Hackers — Post (2026-03-01)
+
+**URL:** https://www.indiehackers.com/post/new
+**Channel:** "What are you building?"
+
+**Body:**
+```
+I built AIQuotaBar — a free macOS menu bar app that shows live Claude and ChatGPT usage limits.
+
+The problem: both AI services have usage caps that aren't surfaced until you hit them. I kept getting cut off mid-Claude-session with zero warning.
+
+The solution: a ~900-line Python app that reads your browser's existing session cookies, calls the same internal APIs that the settings pages use, and shows a live color-coded indicator in your menu bar. 🟢🟡🔴
+
+Zero setup. One command to install. Auto-detects cookies from Chrome, Arc, Firefox, Brave, Safari.
+
+curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
+
+GitHub: https://github.com/yagcioglutoprak/AIQuotaBar — MIT, open source
+
+Would love feedback from other developers who've hit this problem.
+```
 
 ---
 

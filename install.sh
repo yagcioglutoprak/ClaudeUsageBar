@@ -1,59 +1,67 @@
 #!/bin/bash
-# Claude Usage Bar — one-line installer
+# AIQuotaBar — one-line installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/yagcioglutoprak/AIQuotaBar/main/install.sh | bash
 
 set -e
 
 REPO="https://github.com/yagcioglutoprak/AIQuotaBar"
 INSTALL_DIR="$HOME/.ai-quota-bar"
+VENV_DIR="$INSTALL_DIR/.venv"
 PLIST="$HOME/Library/LaunchAgents/com.claudebar.plist"
 
 echo ""
-echo "  Claude Usage Bar — installer"
-echo "  ────────────────────────────"
+echo "  AIQuotaBar — installer"
+echo "  ──────────────────────"
 echo ""
 
 # ── 1. Python 3.10+ ───────────────────────────────────────────────────────────
-PYTHON=""
-for candidate in python3 python3.12 python3.11 python3.10; do
+BASE_PYTHON=""
+for candidate in python3 python3.13 python3.12 python3.11 python3.10; do
   if command -v "$candidate" &>/dev/null; then
     VER=$("$candidate" -c 'import sys; print(sys.version_info >= (3,10))' 2>/dev/null)
     if [ "$VER" = "True" ]; then
-      PYTHON="$candidate"
+      BASE_PYTHON="$candidate"
       break
     fi
   fi
 done
 
-if [ -z "$PYTHON" ]; then
+if [ -z "$BASE_PYTHON" ]; then
   echo "  ✗  Python 3.10+ not found."
   echo "     Install it from https://www.python.org/downloads/ and re-run."
   exit 1
 fi
-echo "  ✓  Python: $($PYTHON --version)"
+echo "  ✓  Python: $($BASE_PYTHON --version)"
 
-# ── 2. Clone / update ─────────────────────────────────────────────────────────
+# ── 2. Git check ──────────────────────────────────────────────────────────────
+if ! command -v git &>/dev/null; then
+  echo "  ✗  Git not found. Install Xcode Command Line Tools first:"
+  echo "     xcode-select --install"
+  exit 1
+fi
+
+# ── 3. Clone / update ─────────────────────────────────────────────────────────
 if [ -d "$INSTALL_DIR/.git" ]; then
   echo "  ↻  Updating existing install…"
-  git -C "$INSTALL_DIR" pull --quiet
+  git -C "$INSTALL_DIR" fetch --quiet origin
+  git -C "$INSTALL_DIR" reset --hard origin/main --quiet
 else
   echo "  ↓  Cloning repository…"
   git clone --quiet "$REPO" "$INSTALL_DIR"
 fi
 
-# ── 3. Dependencies ───────────────────────────────────────────────────────────
-echo "  ↓  Installing Python dependencies…"
-"$PYTHON" -m pip install --quiet --upgrade rumps curl_cffi browser-cookie3
-
-# Fix rumps notification centre (requires CFBundleIdentifier in Info.plist)
-PYTHON_BIN=$(dirname "$("$PYTHON" -c 'import sys; print(sys.executable)')")
-PLIST_PATH="$PYTHON_BIN/Info.plist"
-if [ ! -f "$PLIST_PATH" ]; then
-  /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string "rumps"' "$PLIST_PATH" 2>/dev/null || true
+# ── 4. Virtual environment + dependencies ─────────────────────────────────────
+echo "  ↓  Setting up virtual environment…"
+if [ ! -d "$VENV_DIR" ]; then
+  "$BASE_PYTHON" -m venv "$VENV_DIR"
 fi
+PYTHON="$VENV_DIR/bin/python3"
+echo "  ↓  Installing Python dependencies…"
+"$PYTHON" -m pip install --quiet --upgrade pip
+"$PYTHON" -m pip install --quiet --upgrade rumps curl_cffi browser-cookie3
 echo "  ✓  Dependencies installed"
 
-# ── 4. LaunchAgent (run at login) ─────────────────────────────────────────────
+# ── 5. LaunchAgent (run at login) ─────────────────────────────────────────────
 mkdir -p "$HOME/Library/LaunchAgents"
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -71,18 +79,29 @@ cat > "$PLIST" <<PLIST_EOF
     <true/>
     <key>KeepAlive</key>
     <false/>
+    <key>StandardOutPath</key>
+    <string>$HOME/.claude_bar.log</string>
     <key>StandardErrorPath</key>
     <string>$HOME/.claude_bar.log</string>
 </dict>
 </plist>
 PLIST_EOF
 
-launchctl unload "$PLIST" 2>/dev/null || true
-launchctl load "$PLIST"
+launchctl bootout gui/$(id -u) "$PLIST" 2>/dev/null || true
+launchctl bootstrap gui/$(id -u) "$PLIST"
 echo "  ✓  Added to Login Items (runs at every login)"
 
-# ── 5. Launch now ─────────────────────────────────────────────────────────────
-pkill -f claude_bar.py 2>/dev/null || true
+# ── 5b. Widget (optional — requires Xcode) ──────────────────────────────────
+if command -v xcodebuild &>/dev/null && [ -d "$INSTALL_DIR/AIQuotaBarWidget/AIQuotaBarWidget.xcodeproj" ]; then
+    echo "  ↓  Building desktop widget…"
+    bash "$INSTALL_DIR/AIQuotaBarWidget/build_widget.sh" || echo "  ⚠  Widget build failed (non-fatal)"
+else
+    echo "  ⊘  Widget: skipped (requires Xcode + project setup)"
+fi
+echo ""
+
+# ── 6. Launch now ─────────────────────────────────────────────────────────────
+pkill -f "$INSTALL_DIR/claude_bar.py" 2>/dev/null || true
 sleep 1
 "$PYTHON" "$INSTALL_DIR/claude_bar.py" &>/dev/null &
 echo "  ✓  Launched!"

@@ -29,6 +29,18 @@ claude_bar.py
 └── App            ClaudeBar(rumps.App) — timer, menu rebuild, callbacks
 ```
 
+## Widget (optional)
+
+A native macOS WidgetKit widget in `AIQuotaBarWidget/` shows usage on the desktop.
+
+**Data flow:** `claude_bar.py` → `~/Library/Group Containers/group.com.aiquotabar/usage.json` → WidgetKit reads it.
+
+- `_write_widget_cache()` runs after every fetch cycle (atomic write, never crashes main app)
+- Widget refreshes every 15 min via `TimelineProvider`
+- Shows stale indicator if data is >30 min old
+- Small widget: circular gauge (Claude session %). Medium: side-by-side bars
+- Requires Xcode 15+ to build; entirely optional — menu bar app works without it
+
 ## Adding a new provider
 
 1. Write `fetch_myprovider(api_key: str) -> ProviderData` — return `ProviderData` with `spent`/`limit` or `balance`
@@ -41,9 +53,8 @@ claude_bar.py
   Weekly limits appear in the menu only. Rationale: session determines immediate access.
 - **Firefox/LibreWolf first** in browser detection order — no Keychain prompt, zero friction.
   Chromium browsers (Arc, Chrome, Brave) come after; they need one-time "Always Allow".
-- **API utilization scale is inconsistent**: `five_hour` returns 0–1 fraction,
-  `seven_day` / `seven_day_sonnet` return 0–100 percentage.
-  Fix: `raw > 1.0 → already percentage, else multiply by 100`.
+- **API utilization scale is now consistent**: all fields (`five_hour`, `seven_day`,
+  `seven_day_sonnet`) return 0–100 percentage. No conversion needed.
 - **`rumps.notification` crashes** in dev (missing Info.plist CFBundleIdentifier).
   All notifications go through `_notify()` which swallows the exception silently.
 - **Cookies are cached** in `~/.claude_bar_config.json`. Auto-detect runs on first launch
@@ -59,7 +70,7 @@ Requires Cloudflare bypass — use `curl_cffi` with `impersonate="chrome131"`.
 Response fields:
 | Field              | Meaning                        | Utilization scale |
 |--------------------|--------------------------------|-------------------|
-| `five_hour`        | Current session (5-hr limit)   | 0–1 fraction      |
+| `five_hour`        | Current session (5-hr limit)   | 0–100 percentage  |
 | `seven_day`        | Weekly all-models              | 0–100 percentage  |
 | `seven_day_sonnet` | Weekly Sonnet-only             | 0–100 percentage  |
 | `extra_usage`      | Overage toggle (null = off)    | —                 |
@@ -73,6 +84,7 @@ Response fields:
 | `requirements.txt` | `rumps`, `curl_cffi`, `browser-cookie3`           |
 | `setup.sh`      | Legacy manual installer (kept for reference)         |
 | `assets/`       | demo.gif and screenshots for README                  |
+| `AIQuotaBarWidget/` | Optional WidgetKit desktop widget (Xcode project)   |
 
 ## Growth / virality rules
 
@@ -107,7 +119,7 @@ pkill -f claude_bar.py; sleep 1; python3 claude_bar.py &
 ## Do not
 
 - Do not add a `session_key` field — the app uses full cookie strings, not just the session key.
-- Do not multiply all utilization values by 100 — `five_hour` is already a fraction but `seven_day` fields are already percentages.
+- Do not multiply utilization values by 100 — all fields now return 0–100 percentages directly.
 - Do not call `rumps.notification()` directly — always use `_notify()`.
 - Do not store cookies in plaintext anywhere other than `~/.claude_bar_config.json` (which is gitignored).
 - Do not add Electron, a web server, or any always-on background process beyond the menu bar app itself.
