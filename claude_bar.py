@@ -632,11 +632,11 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     import Quartz
 
     PAD = 28
-    GAP = 12          # gap between two GIFs
-    WIN_W = 680
-    HALF_W = (WIN_W - PAD * 2 - GAP) // 2
-    TEXT_AREA_H = 180
-    BTN_AREA_H = 52
+    GAP = 10
+    WIN_W = 560
+    GIF_W = WIN_W - PAD * 2
+    TEXT_AREA_H = 170
+    BTN_AREA_H = 50
 
     # Load both GIFs
     assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
@@ -645,18 +645,19 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     )
     widget_img = NSImage.alloc().initWithContentsOfFile_(gif_path)
 
-    # Calculate GIF height from the tallest one (keep aspect ratio)
     def _scaled_h(img, w):
         if not img:
-            return 200
+            return 180
         iw, ih = img.size().width, img.size().height
-        return int(w * ih / iw) if iw > 0 else 200
+        return int(w * ih / iw) if iw > 0 else 180
 
-    demo_h = _scaled_h(demo_img, HALF_W)
-    widget_h = _scaled_h(widget_img, HALF_W)
-    GIF_H = max(demo_h, widget_h)
+    # Menu bar GIF: constrain width to 240 (it's very tall/narrow)
+    DEMO_W = 240
+    demo_h = min(_scaled_h(demo_img, DEMO_W), 300)
+    # Widget GIF: full width
+    widget_h = _scaled_h(widget_img, GIF_W)
 
-    WIN_H = GIF_H + TEXT_AREA_H + BTN_AREA_H + PAD * 3 + 24  # +24 for labels
+    WIN_H = demo_h + widget_h + TEXT_AREA_H + BTN_AREA_H + PAD * 2 + GAP * 3 + 40
 
     # Centre on screen
     screen = NSScreen.mainScreen().frame()
@@ -718,14 +719,11 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     sub.setTextColor_(NSColor.secondaryLabelColor())
     content.addSubview_(sub)
 
-    # ── Two GIFs side by side ──
-    y_pos -= (GIF_H + 16)
+    # ── Stacked GIFs ──
     border_color = Quartz.CGColorCreateGenericRGB(1, 1, 1, 0.08)
 
-    def _make_gif_panel(img, x_off, h):
-        container = NSView.alloc().initWithFrame_(
-            NSMakeRect(x_off, y_pos, HALF_W, GIF_H)
-        )
+    def _make_gif(img, x_off, y_off, w, h):
+        container = NSView.alloc().initWithFrame_(NSMakeRect(x_off, y_off, w, h))
         container.setWantsLayer_(True)
         container.layer().setCornerRadius_(10)
         container.layer().setMasksToBounds_(True)
@@ -733,28 +731,19 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
         container.layer().setBorderColor_(border_color)
         content.addSubview_(container)
         if img:
-            iv = NSImageView.alloc().initWithFrame_(
-                NSMakeRect(0, 0, HALF_W, GIF_H)
-            )
+            iv = NSImageView.alloc().initWithFrame_(NSMakeRect(0, 0, w, h))
             iv.setImage_(img)
             iv.setAnimates_(True)
-            iv.setImageScaling_(3)  # ProportionallyDown
-            iv.setImageAlignment_(0)  # Center
+            iv.setImageScaling_(3)
+            iv.setImageAlignment_(0)
             iv.setWantsLayer_(True)
             iv.layer().setMagnificationFilter_(Quartz.kCAFilterTrilinear)
             iv.layer().setMinificationFilter_(Quartz.kCAFilterTrilinear)
             container.addSubview_(iv)
 
-    _make_gif_panel(demo_img, PAD, demo_h)
-    _make_gif_panel(widget_img, PAD + HALF_W + GAP, widget_h)
-
-    # ── Labels under GIFs ──
-    y_pos -= 18
-    for label_text, x_off in [("Menu Bar", PAD), ("Desktop Widget", PAD + HALF_W + GAP)]:
-        lbl = NSTextField.alloc().initWithFrame_(
-            NSMakeRect(x_off, y_pos, HALF_W, 14)
-        )
-        lbl.setStringValue_(label_text)
+    def _make_label(text, y_off, w, x_off=PAD):
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x_off, y_off, w, 14))
+        lbl.setStringValue_(text)
         lbl.setBezeled_(False)
         lbl.setDrawsBackground_(False)
         lbl.setEditable_(False)
@@ -763,6 +752,19 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
         lbl.setFont_(NSFont.systemFontOfSize_weight_(11, 0.3))
         lbl.setTextColor_(NSColor.secondaryLabelColor())
         content.addSubview_(lbl)
+
+    # Menu bar GIF (centered, constrained width)
+    y_pos -= (demo_h + 14)
+    demo_x = (WIN_W - DEMO_W) // 2
+    _make_gif(demo_img, demo_x, y_pos, DEMO_W, demo_h)
+    y_pos -= 16
+    _make_label("Menu Bar", y_pos, DEMO_W, demo_x)
+
+    # Widget GIF (full width)
+    y_pos -= (widget_h + GAP)
+    _make_gif(widget_img, PAD, y_pos, GIF_W, widget_h)
+    y_pos -= 16
+    _make_label("Desktop Widget", y_pos, GIF_W)
 
     # ── Info rows ──
     y_pos -= 16
