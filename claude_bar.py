@@ -143,21 +143,16 @@ class ProviderData:
 # ── claude.ai API ─────────────────────────────────────────────────────────────
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
     "Referer": "https://claude.ai/settings/usage",
     "Origin": "https://claude.ai",
-    "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
 }
+# Cloudflare fingerprint-checks Chrome aggressively; Safari passes cleanly.
+_IMPERSONATE = "safari184"
+# Cloudflare-bound cookies are tied to the real browser fingerprint —
+# sending them from a different TLS stack causes a mismatch → 403.
+_CF_COOKIE_KEYS = frozenset({"cf_clearance", "__cf_bm", "_cfuvid"})
 
 
 def parse_cookie_string(raw: str) -> dict:
@@ -174,10 +169,14 @@ def parse_cookie_string(raw: str) -> dict:
     return cookies
 
 
+def _strip_cf_cookies(cookies: dict) -> dict:
+    return {k: v for k, v in cookies.items() if k not in _CF_COOKIE_KEYS}
+
+
 def _get(url: str, cookies: dict) -> dict | list:
     r = requests.get(
-        url, cookies=cookies, headers=HEADERS, timeout=15,
-        impersonate="chrome131",
+        url, cookies=_strip_cf_cookies(cookies), headers=HEADERS, timeout=15,
+        impersonate=_IMPERSONATE,
     )
     log.debug("GET %s  status=%s  body=%s", url, r.status_code, r.text[:800])
     r.raise_for_status()
@@ -242,21 +241,15 @@ def fetch_raw(cookie_str: str) -> dict:
 # ── third-party provider APIs ────────────────────────────────────────────────
 
 def _api_get(url: str, headers: dict, cookies: dict | None = None) -> dict:
-    r = requests.get(url, headers=headers, cookies=cookies, timeout=10, impersonate="chrome131")
+    clean = _strip_cf_cookies(cookies) if cookies else None
+    r = requests.get(url, headers=headers, cookies=clean, timeout=10, impersonate=_IMPERSONATE)
     r.raise_for_status()
     return r.json()
 
 
 _CHATGPT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-    ),
     "Accept": "application/json",
     "Referer": "https://chatgpt.com/codex/settings/usage",
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
 }
 
 
