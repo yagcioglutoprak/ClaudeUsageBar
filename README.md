@@ -4,7 +4,13 @@
 
 No Electron. No browser extension. One command to install.
 
-![AIQuotaBar demo](assets/demo.gif)
+<table><tr>
+<td width="50%"><img src="assets/demo.gif" alt="Menu Bar"></td>
+<td width="50%"><img src="assets/widget_info.gif" alt="Desktop Widget"></td>
+</tr><tr>
+<td align="center"><strong>Menu Bar</strong></td>
+<td align="center"><strong>Desktop Widget</strong></td>
+</tr></table>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/yagcioglutoprak/AIQuotaBar?style=social)](https://github.com/yagcioglutoprak/AIQuotaBar/stargazers)
@@ -81,8 +87,6 @@ CHATGPT
 ## Desktop Widget (NEW)
 
 Native macOS WidgetKit widget — see your Claude and ChatGPT usage right on your desktop or in Notification Center.
-
-![Desktop Widget](assets/widget_info.gif)
 
 **Small widget:** Claude + ChatGPT percentages at a glance, color-coded by brand.
 

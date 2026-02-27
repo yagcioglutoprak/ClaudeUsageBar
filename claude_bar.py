@@ -619,7 +619,7 @@ def _is_widget_installed() -> bool:
 
 
 def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
-    """Show a native macOS welcome window with an animated GIF and info text."""
+    """Show a native macOS welcome window with two animated GIFs and info text."""
     from AppKit import (
         NSWindow, NSImageView, NSImage, NSTextField, NSButton, NSFont,
         NSMakeRect, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
@@ -627,26 +627,36 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
         NSBackingStoreBuffered, NSTextAlignmentCenter,
         NSColor, NSBezelStyleRounded,
         NSApplication, NSFloatingWindowLevel, NSScreen,
-        NSVisualEffectView, NSView, NSBezierPath,
-        NSCompositingOperationSourceOver,
+        NSVisualEffectView, NSView,
     )
     import Quartz
 
-    PAD = 28          # horizontal padding
-    WIN_W = 560       # narrower, more focused
-    GIF_W = WIN_W - PAD * 2
-    TEXT_AREA_H = 200
-    BTN_AREA_H = 56
+    PAD = 28
+    GAP = 12          # gap between two GIFs
+    WIN_W = 680
+    HALF_W = (WIN_W - PAD * 2 - GAP) // 2
+    TEXT_AREA_H = 180
+    BTN_AREA_H = 52
 
-    # Get GIF dimensions for proper aspect ratio
-    img = NSImage.alloc().initWithContentsOfFile_(gif_path)
-    if img:
+    # Load both GIFs
+    assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
+    demo_img = NSImage.alloc().initWithContentsOfFile_(
+        os.path.join(assets_dir, "demo.gif")
+    )
+    widget_img = NSImage.alloc().initWithContentsOfFile_(gif_path)
+
+    # Calculate GIF height from the tallest one (keep aspect ratio)
+    def _scaled_h(img, w):
+        if not img:
+            return 200
         iw, ih = img.size().width, img.size().height
-        GIF_H = int(GIF_W * ih / iw) if iw > 0 else 280
-    else:
-        GIF_H = 280
+        return int(w * ih / iw) if iw > 0 else 200
 
-    WIN_H = GIF_H + TEXT_AREA_H + BTN_AREA_H + PAD * 3
+    demo_h = _scaled_h(demo_img, HALF_W)
+    widget_h = _scaled_h(widget_img, HALF_W)
+    GIF_H = max(demo_h, widget_h)
+
+    WIN_H = GIF_H + TEXT_AREA_H + BTN_AREA_H + PAD * 3 + 24  # +24 for labels
 
     # Centre on screen
     screen = NSScreen.mainScreen().frame()
@@ -671,13 +681,13 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
 
     # ── Vibrancy background ──
     blur = NSVisualEffectView.alloc().initWithFrame_(content.bounds())
-    blur.setAutoresizingMask_(18)  # width + height
-    blur.setBlendingMode_(0)       # NSVisualEffectBlendingModeBehindWindow
-    blur.setMaterial_(3)           # NSVisualEffectMaterialHUDWindow
-    blur.setState_(1)              # NSVisualEffectStateActive
+    blur.setAutoresizingMask_(18)
+    blur.setBlendingMode_(0)
+    blur.setMaterial_(3)
+    blur.setState_(1)
     content.addSubview_(blur)
 
-    y_pos = WIN_H  # start from top, go down
+    y_pos = WIN_H
 
     # ── Title ──
     y_pos -= 52
@@ -690,7 +700,7 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     title.setEditable_(False)
     title.setSelectable_(False)
     title.setAlignment_(NSTextAlignmentCenter)
-    title.setFont_(NSFont.systemFontOfSize_weight_(20, 0.56))  # semibold
+    title.setFont_(NSFont.systemFontOfSize_weight_(20, 0.56))
     content.addSubview_(title)
 
     # ── Subtitle ──
@@ -708,36 +718,54 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     sub.setTextColor_(NSColor.secondaryLabelColor())
     content.addSubview_(sub)
 
-    # ── GIF in a rounded container ──
+    # ── Two GIFs side by side ──
     y_pos -= (GIF_H + 16)
-    gif_container = NSView.alloc().initWithFrame_(
-        NSMakeRect(PAD, y_pos, GIF_W, GIF_H)
-    )
-    gif_container.setWantsLayer_(True)
-    gif_container.layer().setCornerRadius_(12)
-    gif_container.layer().setMasksToBounds_(True)
-    gif_container.layer().setBorderWidth_(0.5)
-    gif_container.layer().setBorderColor_(
-        Quartz.CGColorCreateGenericRGB(1, 1, 1, 0.08)
-    )
-    content.addSubview_(gif_container)
+    border_color = Quartz.CGColorCreateGenericRGB(1, 1, 1, 0.08)
 
-    if img:
-        img_view = NSImageView.alloc().initWithFrame_(
-            NSMakeRect(0, 0, GIF_W, GIF_H)
+    def _make_gif_panel(img, x_off, h):
+        container = NSView.alloc().initWithFrame_(
+            NSMakeRect(x_off, y_pos, HALF_W, GIF_H)
         )
-        img_view.setImage_(img)
-        img_view.setAnimates_(True)
-        img_view.setImageScaling_(3)  # NSImageScaleProportionallyDown
-        img_view.setImageAlignment_(0)  # NSImageAlignCenter
-        # Disable interpolation artifacts
-        img_view.setWantsLayer_(True)
-        img_view.layer().setMagnificationFilter_(Quartz.kCAFilterTrilinear)
-        img_view.layer().setMinificationFilter_(Quartz.kCAFilterTrilinear)
-        gif_container.addSubview_(img_view)
+        container.setWantsLayer_(True)
+        container.layer().setCornerRadius_(10)
+        container.layer().setMasksToBounds_(True)
+        container.layer().setBorderWidth_(0.5)
+        container.layer().setBorderColor_(border_color)
+        content.addSubview_(container)
+        if img:
+            iv = NSImageView.alloc().initWithFrame_(
+                NSMakeRect(0, 0, HALF_W, GIF_H)
+            )
+            iv.setImage_(img)
+            iv.setAnimates_(True)
+            iv.setImageScaling_(3)  # ProportionallyDown
+            iv.setImageAlignment_(0)  # Center
+            iv.setWantsLayer_(True)
+            iv.layer().setMagnificationFilter_(Quartz.kCAFilterTrilinear)
+            iv.layer().setMinificationFilter_(Quartz.kCAFilterTrilinear)
+            container.addSubview_(iv)
+
+    _make_gif_panel(demo_img, PAD, demo_h)
+    _make_gif_panel(widget_img, PAD + HALF_W + GAP, widget_h)
+
+    # ── Labels under GIFs ──
+    y_pos -= 18
+    for label_text, x_off in [("Menu Bar", PAD), ("Desktop Widget", PAD + HALF_W + GAP)]:
+        lbl = NSTextField.alloc().initWithFrame_(
+            NSMakeRect(x_off, y_pos, HALF_W, 14)
+        )
+        lbl.setStringValue_(label_text)
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setAlignment_(NSTextAlignmentCenter)
+        lbl.setFont_(NSFont.systemFontOfSize_weight_(11, 0.3))
+        lbl.setTextColor_(NSColor.secondaryLabelColor())
+        content.addSubview_(lbl)
 
     # ── Info rows ──
-    y_pos -= 20
+    y_pos -= 16
     rows = [
         ("Menu Bar",
          "Click the diamond icon to see session limits, weekly caps, and reset times."),
@@ -749,7 +777,7 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
          "Data updates every 60 seconds. Alerts at 80% and 95% usage."),
     ]
     for heading, desc in rows:
-        y_pos -= 22
+        y_pos -= 20
         h_lbl = NSTextField.alloc().initWithFrame_(
             NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 16)
         )
@@ -758,10 +786,10 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
         h_lbl.setDrawsBackground_(False)
         h_lbl.setEditable_(False)
         h_lbl.setSelectable_(False)
-        h_lbl.setFont_(NSFont.systemFontOfSize_weight_(12, 0.4))  # medium
+        h_lbl.setFont_(NSFont.systemFontOfSize_weight_(12, 0.4))
         content.addSubview_(h_lbl)
 
-        y_pos -= 16
+        y_pos -= 15
         d_lbl = NSTextField.alloc().initWithFrame_(
             NSMakeRect(PAD, y_pos, WIN_W - PAD * 2, 14)
         )
@@ -774,16 +802,16 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
         d_lbl.setTextColor_(NSColor.secondaryLabelColor())
         content.addSubview_(d_lbl)
 
-        y_pos -= 10  # spacing between rows
+        y_pos -= 8
 
-    # ── "Got it" button (macOS accent-colored) ──
+    # ── "Got it" button ──
     btn_w, btn_h = 120, 30
     btn = NSButton.alloc().initWithFrame_(
-        NSMakeRect((WIN_W - btn_w) / 2, 18, btn_w, btn_h)
+        NSMakeRect((WIN_W - btn_w) / 2, 16, btn_w, btn_h)
     )
     btn.setTitle_("Got it")
     btn.setBezelStyle_(NSBezelStyleRounded)
-    btn.setKeyEquivalent_("\r")  # Enter key dismisses
+    btn.setKeyEquivalent_("\r")
     btn.setAction_(b"performClose:")
     btn.setTarget_(win)
     content.addSubview_(btn)
