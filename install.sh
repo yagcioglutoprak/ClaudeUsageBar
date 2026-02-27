@@ -91,12 +91,43 @@ launchctl bootout gui/$(id -u) "$PLIST" 2>/dev/null || true
 launchctl bootstrap gui/$(id -u) "$PLIST"
 echo "  ✓  Added to Login Items (runs at every login)"
 
-# ── 5b. Widget (optional — requires Xcode) ──────────────────────────────────
-if command -v xcodebuild &>/dev/null && [ -d "$INSTALL_DIR/AIQuotaBarWidget/AIQuotaBarWidget.xcodeproj" ]; then
-    echo "  ↓  Building desktop widget…"
-    bash "$INSTALL_DIR/AIQuotaBarWidget/build_widget.sh" || echo "  ⚠  Widget build failed (non-fatal)"
+# ── 5b. Desktop Widget ───────────────────────────────────────────────────────
+WIDGET_APP="/Applications/AIQuotaBarHost.app"
+WIDGET_INSTALLED=false
+
+if [ -d "$WIDGET_APP" ]; then
+    echo "  ✓  Desktop widget already installed"
+    WIDGET_INSTALLED=true
+elif command -v xcodebuild &>/dev/null && [ -d "$INSTALL_DIR/AIQuotaBarWidget/AIQuotaBarWidget.xcodeproj" ]; then
+    echo "  ↓  Building desktop widget (Xcode found)…"
+    if bash "$INSTALL_DIR/AIQuotaBarWidget/build_widget.sh"; then
+        WIDGET_INSTALLED=true
+    else
+        echo "  ⚠  Widget build failed (non-fatal)"
+    fi
 else
-    echo "  ⊘  Widget: skipped (requires Xcode + project setup)"
+    echo "  ↓  Installing pre-built desktop widget…"
+    WIDGET_URL="https://github.com/yagcioglutoprak/AIQuotaBar/releases/latest/download/AIQuotaBarWidget.zip"
+    WIDGET_TMP="/tmp/AIQuotaBarWidget_$$.zip"
+    if curl -fsSL -o "$WIDGET_TMP" "$WIDGET_URL" 2>/dev/null; then
+        rm -rf "$WIDGET_APP"
+        ditto -x -k "$WIDGET_TMP" /Applications/
+        xattr -dr com.apple.quarantine "$WIDGET_APP" 2>/dev/null || true
+        rm -f "$WIDGET_TMP"
+        # Launch once to register widget with the system
+        open "$WIDGET_APP"
+        sleep 2
+        osascript -e 'quit app "AIQuotaBarHost"' 2>/dev/null || true
+        echo "  ✓  Desktop widget installed"
+        WIDGET_INSTALLED=true
+    else
+        echo "  ⊘  Widget: download failed (non-fatal, skipping)"
+        rm -f "$WIDGET_TMP"
+    fi
+fi
+
+if [ "$WIDGET_INSTALLED" = true ]; then
+    echo "     Right-click desktop → Edit Widgets → search \"AI Quota\""
 fi
 echo ""
 
