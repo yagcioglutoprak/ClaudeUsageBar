@@ -1354,9 +1354,6 @@ class ClaudeBar(rumps.App):
                 eta = _calc_eta_minutes(self._history, "claude")
                 if eta is not None:
                     items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
-                spark = _sparkline(self._history, "claude")
-                if spark:
-                    items.append(_mi(f"  {spark}"))
                 items.append(None)
 
             for row in [data.weekly_all, data.weekly_sonnet]:
@@ -1390,13 +1387,10 @@ class ClaudeBar(rumps.App):
                     if line:
                         items.append(_mi(line))
                 items.append(None)
-            # ETA + sparkline for ChatGPT
+            # ETA for ChatGPT
             eta = _calc_eta_minutes(self._history, "chatgpt")
             if eta is not None:
                 items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
-            spark = _sparkline(self._history, "chatgpt")
-            if spark:
-                items.append(_mi(f"  {spark}"))
                 items.append(None)
 
         # ── ◇  COPILOT section (if detected) ─────────────────────────────────
@@ -1412,9 +1406,6 @@ class ClaudeBar(rumps.App):
             eta = _calc_eta_minutes(self._history, "copilot")
             if eta is not None:
                 items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
-            spark = _sparkline(self._history, "copilot")
-            if spark:
-                items.append(_mi(f"  {spark}"))
             items.append(None)
 
         # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
