@@ -67,7 +67,103 @@ _NOTIF_DEFAULTS = {
     "chatgpt_reset":  True,   # notify when ChatGPT rate-limit resets
     "claude_warning": True,   # notify when Claude usage crosses WARN/CRIT
     "chatgpt_warning":True,   # notify when ChatGPT usage crosses WARN/CRIT
+    "claude_pacing":  True,   # predictive alert when Claude ETA < 30 min
+    "chatgpt_pacing": True,   # predictive alert when ChatGPT ETA < 30 min
+    "copilot_pacing": True,   # predictive alert when Copilot ETA < 30 min
 }
+
+# ── usage history + burn rate ────────────────────────────────────────────────
+
+HISTORY_FILE = os.path.expanduser("~/.claude_bar_history.json")
+HISTORY_MAX_AGE = 24 * 3600  # prune entries older than 24 h
+PACING_ALERT_MINUTES = 30    # alert when ETA drops below this
+
+
+def _load_history() -> dict:
+    """Load usage history from disk. Returns {"claude": [...], ...}."""
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _save_history(history: dict):
+    """Persist usage history (atomic write)."""
+    tmp = HISTORY_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(history, f)
+    os.replace(tmp, HISTORY_FILE)
+
+
+def _append_history(history: dict, key: str, pct: int):
+    """Append a timestamped pct snapshot and prune old entries."""
+    now = datetime.now(timezone.utc).timestamp()
+    history.setdefault(key, []).append({"t": now, "pct": pct})
+    cutoff = now - HISTORY_MAX_AGE
+    history[key] = [e for e in history[key] if e["t"] >= cutoff]
+
+
+def _calc_burn_rate(history: dict, key: str) -> float | None:
+    """Linear regression over last 30 min of data points.
+
+    Returns pct per minute (positive = increasing usage), or None if
+    insufficient data.
+    """
+    entries = history.get(key, [])
+    if len(entries) < 2:
+        return None
+    now = datetime.now(timezone.utc).timestamp()
+    cutoff = now - 30 * 60
+    recent = [e for e in entries if e["t"] >= cutoff]
+    if len(recent) < 2:
+        return None
+    n = len(recent)
+    sum_t = sum(e["t"] for e in recent)
+    sum_p = sum(e["pct"] for e in recent)
+    sum_tp = sum(e["t"] * e["pct"] for e in recent)
+    sum_t2 = sum(e["t"] ** 2 for e in recent)
+    denom = n * sum_t2 - sum_t ** 2
+    if abs(denom) < 1e-10:
+        return None
+    slope = (n * sum_tp - sum_t * sum_p) / denom  # pct per second
+    return slope * 60  # pct per minute
+
+
+def _calc_eta_minutes(history: dict, key: str) -> int | None:
+    """Estimate minutes until 100% based on burn rate.
+
+    Returns None if burn rate is non-positive or ETA > 10 hours.
+    """
+    entries = history.get(key, [])
+    if not entries:
+        return None
+    current_pct = entries[-1]["pct"]
+    rate = _calc_burn_rate(history, key)
+    if rate is None or rate <= 0:
+        return None
+    remaining = 100 - current_pct
+    if remaining <= 0:
+        return 0
+    eta = remaining / rate  # minutes
+    if eta > 600:  # > 10 hours
+        return None
+    return max(1, round(eta))
+
+
+def _sparkline(history: dict, key: str, width: int = 20) -> str:
+    """Render a sparkline from history using block chars."""
+    entries = history.get(key, [])
+    if len(entries) < 2:
+        return ""
+    blocks = "▁▂▃▄▅▆▇█"
+    pts = [e["pct"] for e in entries[-width:]]
+    lo, hi = min(pts), max(pts)
+    span = hi - lo if hi > lo else 1
+    return "".join(blocks[min(7, int((p - lo) / span * 7))] for p in pts)
+
 
 # ── config ────────────────────────────────────────────────────────────────────
 
@@ -376,17 +472,47 @@ def fetch_glm(api_key: str) -> ProviderData:
         return ProviderData("GLM (Zhipu)", error=str(e)[:80])
 
 
+def fetch_copilot(cookie_str: str) -> ProviderData:
+    """Fetch GitHub Copilot premium request usage via browser cookies."""
+    cookies = parse_cookie_string(cookie_str)
+    try:
+        r = requests.get(
+            "https://github.com/settings/billing/copilot_usage_card",
+            cookies=_strip_cf_cookies(cookies),
+            headers={
+                "Accept": "application/json",
+                "Referer": "https://github.com/settings/billing/premium_requests_usage",
+            },
+            timeout=10,
+            impersonate=_IMPERSONATE,
+        )
+        r.raise_for_status()
+        data = r.json()
+        log.debug("copilot_usage_card: %s", json.dumps(data, indent=2))
+        used = float(data.get("discountQuantity", 0))
+        limit = float(data.get("userPremiumRequestEntitlement", 0))
+        return ProviderData(
+            "Copilot", spent=used, limit=limit or None,
+            currency="", period="this month",
+        )
+    except Exception as e:
+        log.debug("fetch_copilot failed: %s", e)
+        return ProviderData("Copilot", error=str(e)[:80])
+
+
 # Registry: config_key → (display_name, fetch_fn)
-# chatgpt_cookies is cookie-based (auto-detected); others are API key-based.
+# chatgpt_cookies / copilot_cookies are cookie-based (auto-detected);
+# others are API key-based.
 PROVIDER_REGISTRY: dict[str, tuple[str, callable]] = {
     "chatgpt_cookies": ("ChatGPT",     fetch_chatgpt),
+    "copilot_cookies": ("Copilot",     fetch_copilot),
     "openai_key":      ("OpenAI",      fetch_openai),
     "minimax_key":     ("MiniMax",     fetch_minimax),
     "glm_key":         ("GLM (Zhipu)", fetch_glm),
 }
 
 # Cookie-based providers (auto-detected from browser, not manually entered)
-_COOKIE_PROVIDERS = {"chatgpt_cookies"}
+_COOKIE_PROVIDERS = {"chatgpt_cookies", "copilot_cookies"}
 
 
 # ── time helpers ──────────────────────────────────────────────────────────────
@@ -1130,6 +1256,13 @@ def _auto_detect_chatgpt_cookies() -> str | None:
     return _run_cookie_detection("chatgpt.com", "__Secure-next-auth.session-token")
 
 
+def _auto_detect_copilot_cookies() -> str | None:
+    """Detect github.com session cookies from the browser (crash-safe subprocess)."""
+    if not _BROWSER_COOKIE3_OK:
+        return None
+    return _run_cookie_detection("github.com", "user_session")
+
+
 def _notify(title: str, subtitle: str, message: str = ""):
     """rumps.notification wrapper — silently swallows if the notification
     center is unavailable (e.g. missing Info.plist in dev environments)."""
@@ -1169,6 +1302,8 @@ class ClaudeBar(rumps.App):
 
         self._refresh_interval = self.config.get("refresh_interval", DEFAULT_REFRESH)
         self._cc_stats: dict | None = None   # Claude Code local stats
+        self._history = _load_history()       # usage history for burn rate / sparkline
+        self._pacing_alerted: set[str] = set()  # track which providers we've pacing-alerted
 
         # Thread-safe UI update queue (background thread → main thread)
         self._ui_pending_title: str | None = None
@@ -1207,6 +1342,13 @@ class ClaudeBar(rumps.App):
                 lines = _row_lines(data.session)
                 items.append(_mi(lines[0]))
                 items.append(_colored_mi(lines[1], "#D97757"))
+                # ETA + sparkline for Claude session
+                eta = _calc_eta_minutes(self._history, "claude")
+                if eta is not None:
+                    items.append(_mi(f"  ⏱ Limit in ~{eta} min"))
+                spark = _sparkline(self._history, "claude")
+                if spark:
+                    items.append(_mi(f"  {spark}"))
                 items.append(None)
 
             for row in [data.weekly_all, data.weekly_sonnet]:
@@ -1240,6 +1382,32 @@ class ClaudeBar(rumps.App):
                     if line:
                         items.append(_mi(line))
                 items.append(None)
+            # ETA + sparkline for ChatGPT
+            eta = _calc_eta_minutes(self._history, "chatgpt")
+            if eta is not None:
+                items.append(_mi(f"  ⏱ Limit in ~{eta} min"))
+            spark = _sparkline(self._history, "chatgpt")
+            if spark:
+                items.append(_mi(f"  {spark}"))
+                items.append(None)
+
+        # ── ◇  COPILOT section (if detected) ─────────────────────────────────
+        copilot_pd = next(
+            (pd for pd in self._provider_data if pd.name == "Copilot"), None
+        )
+        if copilot_pd:
+            items.append(_section_header_mi("  GitHub Copilot", None, "#6E40C9"))
+            for line in _provider_lines(copilot_pd):
+                if line:
+                    items.append(_mi(line))
+            # ETA + sparkline for Copilot
+            eta = _calc_eta_minutes(self._history, "copilot")
+            if eta is not None:
+                items.append(_mi(f"  ⏱ Limit in ~{eta} min"))
+            spark = _sparkline(self._history, "copilot")
+            if spark:
+                items.append(_mi(f"  {spark}"))
+            items.append(None)
 
         # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
         if self._cc_stats:
@@ -1263,7 +1431,7 @@ class ClaudeBar(rumps.App):
 
         # ── Other API providers ────────────────────────────────────────────
         for pd in self._provider_data:
-            if pd.name == "ChatGPT":
+            if pd.name in ("ChatGPT", "Copilot"):
                 continue
             items.append(_mi(f"  {pd.name}"))
             items.append(None)
@@ -1282,6 +1450,7 @@ class ClaudeBar(rumps.App):
         items.append(rumps.MenuItem("Refresh Now", callback=self._do_refresh))
         items.append(rumps.MenuItem("Open claude.ai/settings/usage", callback=self._open_usage_page))
         items.append(rumps.MenuItem("Share on X / Twitter…", callback=self._share_on_x))
+        items.append(rumps.MenuItem("⭐ Star on GitHub", callback=self._open_github))
         items.append(None)
 
         # Refresh interval submenu
@@ -1297,8 +1466,11 @@ class ClaudeBar(rumps.App):
         _notif_labels = [
             ("claude_warning",  "Claude — usage warnings (80% / 95%)"),
             ("claude_reset",    "Claude — reset alerts"),
+            ("claude_pacing",   "Claude — pacing alert (ETA < 30 min)"),
             ("chatgpt_warning", "ChatGPT — usage warnings (80% / 95%)"),
             ("chatgpt_reset",   "ChatGPT — reset alerts"),
+            ("chatgpt_pacing",  "ChatGPT — pacing alert (ETA < 30 min)"),
+            ("copilot_pacing",  "Copilot — pacing alert (ETA < 30 min)"),
         ]
         for nkey, nlabel in _notif_labels:
             item = rumps.MenuItem(nlabel, callback=self._make_notif_toggle_cb(nkey))
@@ -1493,6 +1665,27 @@ class ClaudeBar(rumps.App):
             self._fetch_providers()
             self._check_provider_warnings(self._provider_data)
             self._cc_stats = fetch_claude_code_stats()
+
+            # ── record usage history ──
+            if data.session:
+                _append_history(self._history, "claude", data.session.pct)
+            chatgpt_pd = next(
+                (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
+            )
+            if chatgpt_pd and not chatgpt_pd.error:
+                rows = getattr(chatgpt_pd, "_rows", None)
+                if rows:
+                    worst = max(r.pct for r in rows)
+                    _append_history(self._history, "chatgpt", worst)
+            copilot_pd = next(
+                (pd for pd in self._provider_data if pd.name == "Copilot"), None
+            )
+            if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
+                _append_history(self._history, "copilot", copilot_pd.pct)
+            _save_history(self._history)
+
+            self._check_pacing_alerts()
+
             self._post_data(data)          # ← main thread applies title + menu
             _write_widget_cache(data, self._provider_data, self._cc_stats)
         except CurlHTTPError as e:
@@ -1623,6 +1816,29 @@ class ClaudeBar(rumps.App):
 
             self._prev_pcts[key] = row.pct
 
+    def _check_pacing_alerts(self):
+        """Send predictive notification when ETA drops below PACING_ALERT_MINUTES."""
+        _pacing_map = [
+            ("claude",  "claude_pacing",  "Claude session"),
+            ("chatgpt", "chatgpt_pacing", "ChatGPT"),
+            ("copilot", "copilot_pacing", "Copilot"),
+        ]
+        for hkey, nkey, label in _pacing_map:
+            if not _notif_enabled(self.config, nkey):
+                continue
+            eta = _calc_eta_minutes(self._history, hkey)
+            if eta is not None and eta <= PACING_ALERT_MINUTES:
+                if hkey not in self._pacing_alerted:
+                    self._pacing_alerted.add(hkey)
+                    _notify(
+                        "Claude Usage Bar ⏱",
+                        f"Slow down — {label} limit in ~{eta} min",
+                        "At your current pace you'll hit the cap soon.",
+                    )
+            else:
+                # Pace slowed down — allow re-alerting if it picks up again
+                self._pacing_alerted.discard(hkey)
+
     def _set_bar_title(self, pct: int, extra: str = "",
                        chatgpt_pct: int | None = None,
                        cc_msgs: int | None = None):
@@ -1733,10 +1949,15 @@ class ClaudeBar(rumps.App):
     def _fetch_providers(self):
         """Fetch all configured third-party API providers (sync, called from fetch thread)."""
         # Auto-detect ChatGPT cookies if not saved yet
+        _cookie_detectors = {
+            "chatgpt_cookies": _auto_detect_chatgpt_cookies,
+            "copilot_cookies": _auto_detect_copilot_cookies,
+        }
         for cfg_key in _COOKIE_PROVIDERS:
             if not self.config.get(cfg_key):
-                if cfg_key == "chatgpt_cookies":
-                    ck = _auto_detect_chatgpt_cookies()
+                detect_fn = _cookie_detectors.get(cfg_key)
+                if detect_fn:
+                    ck = detect_fn()
                     if ck:
                         self.config[cfg_key] = ck
                         save_config(self.config)
@@ -1755,6 +1976,9 @@ class ClaudeBar(rumps.App):
 
     def _open_usage_page(self, _sender):
         subprocess.Popen(["open", "https://claude.ai/settings/usage"])
+
+    def _open_github(self, _sender):
+        subprocess.Popen(["open", "https://github.com/yagcioglutoprak/AIQuotaBar"])
 
     def _share_on_x(self, _sender):
         data = self._last_data
@@ -1780,8 +2004,13 @@ class ClaudeBar(rumps.App):
         def _cb(_sender):
             if cfg_key in _COOKIE_PROVIDERS:
                 # Cookie-based: re-run auto-detect
-                if cfg_key == "chatgpt_cookies":
-                    ck = _auto_detect_chatgpt_cookies()
+                _detectors = {
+                    "chatgpt_cookies": _auto_detect_chatgpt_cookies,
+                    "copilot_cookies": _auto_detect_copilot_cookies,
+                }
+                detect_fn = _detectors.get(cfg_key)
+                if detect_fn:
+                    ck = detect_fn()
                     if ck:
                         self.config[cfg_key] = ck
                         save_config(self.config)
