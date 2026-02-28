@@ -153,6 +153,14 @@ def _calc_eta_minutes(history: dict, key: str) -> int | None:
     return max(1, round(eta))
 
 
+def _fmt_eta(minutes: int) -> str:
+    """Format ETA: 47 → '47 min', 90 → '1h 30 min', 360 → '6h 0 min'."""
+    if minutes < 60:
+        return f"{minutes} min"
+    h, m = divmod(minutes, 60)
+    return f"{h}h {m} min"
+
+
 def _sparkline(history: dict, key: str, width: int = 20) -> str:
     """Render a sparkline from history using block chars."""
     entries = history.get(key, [])
@@ -1345,7 +1353,7 @@ class ClaudeBar(rumps.App):
                 # ETA + sparkline for Claude session
                 eta = _calc_eta_minutes(self._history, "claude")
                 if eta is not None:
-                    items.append(_mi(f"  ⏱ Limit in ~{eta} min"))
+                    items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
                 spark = _sparkline(self._history, "claude")
                 if spark:
                     items.append(_mi(f"  {spark}"))
@@ -1385,7 +1393,7 @@ class ClaudeBar(rumps.App):
             # ETA + sparkline for ChatGPT
             eta = _calc_eta_minutes(self._history, "chatgpt")
             if eta is not None:
-                items.append(_mi(f"  ⏱ Limit in ~{eta} min"))
+                items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
             spark = _sparkline(self._history, "chatgpt")
             if spark:
                 items.append(_mi(f"  {spark}"))
@@ -1403,7 +1411,7 @@ class ClaudeBar(rumps.App):
             # ETA + sparkline for Copilot
             eta = _calc_eta_minutes(self._history, "copilot")
             if eta is not None:
-                items.append(_mi(f"  ⏱ Limit in ~{eta} min"))
+                items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
             spark = _sparkline(self._history, "copilot")
             if spark:
                 items.append(_mi(f"  {spark}"))
@@ -1832,7 +1840,7 @@ class ClaudeBar(rumps.App):
                     self._pacing_alerted.add(hkey)
                     _notify(
                         "Claude Usage Bar ⏱",
-                        f"Slow down — {label} limit in ~{eta} min",
+                        f"Slow down — {label} limit in ~{_fmt_eta(eta)}",
                         "At your current pace you'll hit the cap soon.",
                     )
             else:
