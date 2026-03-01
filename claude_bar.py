@@ -16,6 +16,7 @@ import rumps
 from curl_cffi import requests  # Chrome TLS fingerprint — bypasses Cloudflare
 from curl_cffi.requests.exceptions import HTTPError as CurlHTTPError
 import json
+import math
 import os
 import subprocess
 import sys
@@ -79,6 +80,9 @@ _NOTIF_DEFAULTS = {
 HISTORY_FILE = os.path.expanduser("~/.claude_bar_history.json")
 HISTORY_MAX_AGE = 24 * 3600  # prune entries older than 24 h
 PACING_ALERT_MINUTES = 30    # alert when ETA drops below this
+_BURN_WINDOW = 30 * 60       # regression window: 30 minutes
+_MIN_SPAN_SECS = 5 * 60      # need ≥5 min of data before showing ETA
+_RESET_DROP_PCT = 30          # pct drop that signals a reset
 
 
 def _load_history() -> dict:
@@ -101,36 +105,71 @@ def _save_history(history: dict):
 
 
 def _append_history(history: dict, key: str, pct: int):
-    """Append a timestamped pct snapshot and prune old entries."""
+    """Append a timestamped pct snapshot, detect resets, and prune."""
     now = datetime.now(timezone.utc).timestamp()
-    history.setdefault(key, []).append({"t": now, "pct": pct})
+    entries = history.setdefault(key, [])
+
+    # Detect reset: if pct dropped by ≥_RESET_DROP_PCT, discard old data.
+    # This prevents stale pre-reset points from poisoning the regression.
+    if entries and (entries[-1]["pct"] - pct) >= _RESET_DROP_PCT:
+        entries.clear()
+
+    entries.append({"t": now, "pct": pct})
     cutoff = now - HISTORY_MAX_AGE
-    history[key] = [e for e in history[key] if e["t"] >= cutoff]
+    history[key] = [e for e in entries if e["t"] >= cutoff]
 
 
 def _calc_burn_rate(history: dict, key: str) -> float | None:
-    """Linear regression over last 30 min of data points.
+    """Recency-weighted linear regression over the last 30 min.
+
+    Uses exponential decay weighting (half-life = 10 min) so recent
+    data points dominate and old bursts fade quickly.
+    Timestamps are centered around their mean for numerical stability.
 
     Returns pct per minute (positive = increasing usage), or None if
-    insufficient data.
+    insufficient data or time span < 5 minutes.
     """
     entries = history.get(key, [])
     if len(entries) < 2:
         return None
     now = datetime.now(timezone.utc).timestamp()
-    cutoff = now - 30 * 60
+    cutoff = now - _BURN_WINDOW
     recent = [e for e in entries if e["t"] >= cutoff]
     if len(recent) < 2:
         return None
-    n = len(recent)
-    sum_t = sum(e["t"] for e in recent)
-    sum_p = sum(e["pct"] for e in recent)
-    sum_tp = sum(e["t"] * e["pct"] for e in recent)
-    sum_t2 = sum(e["t"] ** 2 for e in recent)
-    denom = n * sum_t2 - sum_t ** 2
+
+    # Require minimum time span to avoid noisy estimates from clustered points
+    span = recent[-1]["t"] - recent[0]["t"]
+    if span < _MIN_SPAN_SECS:
+        return None
+
+    # Center timestamps for numerical stability
+    t_mean = sum(e["t"] for e in recent) / len(recent)
+
+    # Exponential decay weights: half-life of 10 minutes
+    half_life = 10 * 60  # seconds
+    decay = math.log(2) / half_life
+
+    # Weighted linear regression
+    sw = 0.0    # sum of weights
+    swt = 0.0   # sum of w * t_centered
+    swp = 0.0   # sum of w * pct
+    swtp = 0.0  # sum of w * t_centered * pct
+    swt2 = 0.0  # sum of w * t_centered^2
+
+    for e in recent:
+        tc = e["t"] - t_mean
+        w = math.exp(-decay * (now - e["t"]))
+        sw += w
+        swt += w * tc
+        swp += w * e["pct"]
+        swtp += w * tc * e["pct"]
+        swt2 += w * tc * tc
+
+    denom = sw * swt2 - swt * swt
     if abs(denom) < 1e-10:
         return None
-    slope = (n * sum_tp - sum_t * sum_p) / denom  # pct per second
+    slope = (sw * swtp - swt * swp) / denom  # pct per second
     return slope * 60  # pct per minute
 
 
@@ -1551,16 +1590,15 @@ class ClaudeBar(rumps.App):
                     lines = _row_lines(row)
                     items.append(_mi(lines[0]))
                     items.append(_colored_mi(lines[1], "#74AA9C"))
+                    hkey = f"chatgpt_{row.label.lower().replace(' ', '_')}"
+                    eta = _calc_eta_minutes(self._history, hkey)
+                    if eta is not None:
+                        items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
                     items.append(None)
             else:
                 for line in _provider_lines(chatgpt_pd):
                     if line:
                         items.append(_mi(line))
-                items.append(None)
-            # ETA for ChatGPT
-            eta = _calc_eta_minutes(self._history, "chatgpt")
-            if eta is not None:
-                items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
                 items.append(None)
 
         # ── ◇  COPILOT section (if detected) ─────────────────────────────────
@@ -1590,15 +1628,15 @@ class ClaudeBar(rumps.App):
                     lines = _row_lines(row)
                     items.append(_mi(lines[0]))
                     items.append(_colored_mi(lines[1], "#00A0D1"))
+                    hkey = f"cursor_{row.label.lower().replace(' ', '_')}"
+                    eta = _calc_eta_minutes(self._history, hkey)
+                    if eta is not None:
+                        items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
                     items.append(None)
             else:
                 for line in _provider_lines(cursor_pd):
                     if line:
                         items.append(_mi(line))
-                items.append(None)
-            eta = _calc_eta_minutes(self._history, "cursor")
-            if eta is not None:
-                items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
                 items.append(None)
 
         # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
@@ -1896,27 +1934,21 @@ class ClaudeBar(rumps.App):
             # ── record usage history ──
             if data.session:
                 _append_history(self._history, "claude", data.session.pct)
-            chatgpt_pd = next(
-                (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
-            )
-            if chatgpt_pd and not chatgpt_pd.error:
-                rows = getattr(chatgpt_pd, "_rows", None)
-                if rows:
-                    worst = max(r.pct for r in rows)
-                    _append_history(self._history, "chatgpt", worst)
+            # Per-row history for multi-limit providers (avoids mixing
+            # different limit types which made ETAs jump around).
+            for prefix, pname in [("chatgpt", "ChatGPT"), ("cursor", "Cursor")]:
+                pd = next((p for p in self._provider_data if p.name == pname), None)
+                if pd and not pd.error:
+                    rows = getattr(pd, "_rows", None)
+                    if rows:
+                        for row in rows:
+                            hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
+                            _append_history(self._history, hkey, row.pct)
             copilot_pd = next(
                 (pd for pd in self._provider_data if pd.name == "Copilot"), None
             )
             if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
                 _append_history(self._history, "copilot", copilot_pd.pct)
-            cursor_pd = next(
-                (pd for pd in self._provider_data if pd.name == "Cursor"), None
-            )
-            if cursor_pd and not cursor_pd.error:
-                rows = getattr(cursor_pd, "_rows", None)
-                if rows:
-                    worst = max(r.pct for r in rows)
-                    _append_history(self._history, "cursor", worst)
             _save_history(self._history)
 
             self._check_pacing_alerts()
@@ -2058,13 +2090,24 @@ class ClaudeBar(rumps.App):
 
     def _check_pacing_alerts(self):
         """Send predictive notification when ETA drops below PACING_ALERT_MINUTES."""
-        _pacing_map = [
+        # Static entries (single history key per provider)
+        checks: list[tuple[str, str, str]] = [
             ("claude",  "claude_pacing",  "Claude session"),
-            ("chatgpt", "chatgpt_pacing", "ChatGPT"),
             ("copilot", "copilot_pacing", "Copilot"),
-            ("cursor",  "cursor_pacing",  "Cursor"),
         ]
-        for hkey, nkey, label in _pacing_map:
+        # Dynamic per-row entries for multi-limit providers
+        for prefix, pname, nkey in [
+            ("chatgpt", "ChatGPT", "chatgpt_pacing"),
+            ("cursor",  "Cursor",  "cursor_pacing"),
+        ]:
+            pd = next((p for p in self._provider_data if p.name == pname), None)
+            if pd and not pd.error:
+                rows = getattr(pd, "_rows", None) or []
+                for row in rows:
+                    hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
+                    checks.append((hkey, nkey, f"{pname} {row.label}"))
+
+        for hkey, nkey, label in checks:
             if not _notif_enabled(self.config, nkey):
                 continue
             eta = _calc_eta_minutes(self._history, hkey)
@@ -2077,7 +2120,6 @@ class ClaudeBar(rumps.App):
                         "At your current pace you'll hit the cap soon.",
                     )
             else:
-                # Pace slowed down — allow re-alerting if it picks up again
                 self._pacing_alerted.discard(hkey)
 
     # Bar icon/color config per provider name
