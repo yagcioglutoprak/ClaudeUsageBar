@@ -19,8 +19,10 @@ import json
 import math
 import os
 import subprocess
+import sqlite3
 import sys
 import tempfile
+import time
 import threading
 import logging
 import urllib.parse
@@ -80,9 +82,28 @@ _NOTIF_DEFAULTS = {
 HISTORY_FILE = os.path.expanduser("~/.claude_bar_history.json")
 HISTORY_MAX_AGE = 24 * 3600  # prune entries older than 24 h
 PACING_ALERT_MINUTES = 30    # alert when ETA drops below this
+
+# ── SQLite long-term history ─────────────────────────────────────────────────
+HISTORY_DB = os.path.join(os.path.expanduser("~/Library/Application Support/AIQuotaBar"), "history.db")
+_SAMPLES_MAX_DAYS = 7
+_DAILY_MAX_DAYS = 90
+_LIMIT_HIT_PCT = 95
 _BURN_WINDOW = 30 * 60       # regression window: 30 minutes
 _MIN_SPAN_SECS = 5 * 60      # need ≥5 min of data before showing ETA
 _RESET_DROP_PCT = 30          # pct drop that signals a reset
+
+_HISTORY_COLORS = {
+    "claude": "#D97757", "chatgpt": "#74AA9C",
+    "copilot": "#6E40C9", "cursor": "#00A0D1",
+}
+
+
+def _nscolor(hex_str: str, alpha: float = 1.0):
+    """Convert a hex color string like '#D97757' to an NSColor."""
+    from AppKit import NSColor
+    h = hex_str.lstrip("#")
+    r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
+    return NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, alpha)
 
 
 def _load_history() -> dict:
@@ -203,15 +224,275 @@ def _fmt_eta(minutes: int) -> str:
 
 
 def _sparkline(history: dict, key: str, width: int = 20) -> str:
-    """Render a sparkline from history using block chars."""
+    """Render a sparkline from history using block chars.
+
+    Returns empty string if fewer than 3 points or no meaningful variation.
+    """
     entries = history.get(key, [])
-    if len(entries) < 2:
+    if len(entries) < 3:
         return ""
     blocks = "▁▂▃▄▅▆▇█"
     pts = [e["pct"] for e in entries[-width:]]
     lo, hi = min(pts), max(pts)
-    span = hi - lo if hi > lo else 1
+    # Skip if all values are the same (no variation → flat line looks bad)
+    if hi - lo < 2:
+        return ""
+    span = hi - lo
     return "".join(blocks[min(7, int((p - lo) / span * 7))] for p in pts)
+
+
+# ── SQLite history functions ──────────────────────────────────────────────────
+
+def _init_history_db() -> sqlite3.Connection:
+    """Create/open the SQLite history database. Returns a WAL-mode connection."""
+    os.makedirs(os.path.dirname(HISTORY_DB), exist_ok=True)
+    conn = sqlite3.connect(HISTORY_DB, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS samples (
+            ts   REAL NOT NULL,
+            key  TEXT NOT NULL,
+            pct  INTEGER NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_samples_key_ts ON samples(key, ts)")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS daily_stats (
+            date       TEXT NOT NULL,
+            key        TEXT NOT NULL,
+            peak_pct   INTEGER NOT NULL,
+            avg_pct    INTEGER NOT NULL,
+            limit_hits INTEGER NOT NULL DEFAULT 0,
+            samples    INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (date, key)
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def _record_sample(conn: sqlite3.Connection, key: str, pct: int):
+    """Insert one usage sample into the samples table."""
+    now = datetime.now(timezone.utc).timestamp()
+    conn.execute("INSERT INTO samples (ts, key, pct) VALUES (?, ?, ?)", (now, key, pct))
+    conn.commit()
+
+
+def _rollup_daily_stats(conn: sqlite3.Connection):
+    """Aggregate completed days from samples into daily_stats, then prune old data."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Find all distinct dates in samples that are before today
+    rows = conn.execute(
+        "SELECT DISTINCT date(ts, 'unixepoch') AS d FROM samples WHERE d < ? ORDER BY d",
+        (today,),
+    ).fetchall()
+
+    for (day,) in rows:
+        # Aggregate that day's samples per key
+        agg = conn.execute("""
+            SELECT key, MAX(pct), CAST(AVG(pct) AS INTEGER), COUNT(*),
+                   SUM(CASE WHEN pct >= ? THEN 1 ELSE 0 END)
+            FROM samples
+            WHERE date(ts, 'unixepoch') = ?
+            GROUP BY key
+        """, (_LIMIT_HIT_PCT, day)).fetchall()
+
+        for key, peak, avg, cnt, hits in agg:
+            conn.execute("""
+                INSERT INTO daily_stats (date, key, peak_pct, avg_pct, limit_hits, samples)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(date, key) DO UPDATE SET
+                    peak_pct=excluded.peak_pct, avg_pct=excluded.avg_pct,
+                    limit_hits=excluded.limit_hits, samples=excluded.samples
+            """, (day, key, peak, avg, hits, cnt))
+
+        # Delete rolled-up samples
+        conn.execute("DELETE FROM samples WHERE date(ts, 'unixepoch') = ?", (day,))
+
+    # Prune old data
+    cutoff_samples = (datetime.now(timezone.utc) - timedelta(days=_SAMPLES_MAX_DAYS)).timestamp()
+    conn.execute("DELETE FROM samples WHERE ts < ?", (cutoff_samples,))
+    cutoff_daily = (datetime.now(timezone.utc) - timedelta(days=_DAILY_MAX_DAYS)).strftime("%Y-%m-%d")
+    conn.execute("DELETE FROM daily_stats WHERE date < ?", (cutoff_daily,))
+    conn.commit()
+
+
+def _get_weekly_stats(conn: sqlite3.Connection, key: str) -> list[dict]:
+    """Return last 7 days of daily_stats for a given key, ordered by date."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+    rows = conn.execute(
+        "SELECT date, peak_pct, avg_pct, limit_hits, samples FROM daily_stats "
+        "WHERE key = ? AND date >= ? ORDER BY date",
+        (key, cutoff),
+    ).fetchall()
+    return [
+        {"date": r[0], "peak_pct": r[1], "avg_pct": r[2], "limit_hits": r[3], "samples": r[4]}
+        for r in rows
+    ]
+
+
+def _get_week_limit_hits(conn: sqlite3.Connection, key: str) -> int:
+    """Return total number of limit-hit samples in the past 7 days."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+    row = conn.execute(
+        "SELECT COALESCE(SUM(limit_hits), 0) FROM daily_stats WHERE key = ? AND date >= ?",
+        (key, cutoff),
+    ).fetchone()
+    # Also count today's samples that are at limit
+    cutoff_ts = (datetime.now(timezone.utc) - timedelta(days=7)).timestamp()
+    today_row = conn.execute(
+        "SELECT COUNT(*) FROM samples WHERE key = ? AND pct >= ? AND ts >= ?",
+        (key, _LIMIT_HIT_PCT, cutoff_ts),
+    ).fetchone()
+    return (row[0] if row else 0) + (today_row[0] if today_row else 0)
+
+
+def _weekly_sparkline(daily_stats: list[dict], width: int = 7) -> str:
+    """Render a 7-day sparkline from daily peak values."""
+    if len(daily_stats) < 2:
+        return ""
+    blocks = "▁▂▃▄▅▆▇█"
+    pts = [d["peak_pct"] for d in daily_stats[-width:]]
+    lo, hi = min(pts), max(pts)
+    if hi - lo < 2:
+        return ""
+    span = hi - lo
+    return "".join(blocks[min(7, int((p - lo) / span * 7))] for p in pts)
+
+
+def _get_today_stats(conn: sqlite3.Connection) -> dict[str, dict]:
+    """Compute live stats from today's samples (not yet rolled up)."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    rows = conn.execute("""
+        SELECT key, MAX(pct), CAST(AVG(pct) AS INTEGER), COUNT(*),
+               SUM(CASE WHEN pct >= ? THEN 1 ELSE 0 END)
+        FROM samples
+        WHERE date(ts, 'unixepoch') = ?
+        GROUP BY key
+    """, (_LIMIT_HIT_PCT, today)).fetchall()
+    result = {}
+    for key, peak, avg, cnt, hits in rows:
+        result[key] = {
+            "date": today, "peak_pct": peak, "avg_pct": avg,
+            "limit_hits": hits, "samples": cnt,
+        }
+    return result
+
+
+def _fetch_history_data(conn: sqlite3.Connection) -> dict | None:
+    """Gather all history data for the Usage History window."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    cutoff_90 = (datetime.now(timezone.utc) - timedelta(days=90)).strftime("%Y-%m-%d")
+
+    # All daily_stats rows within 90 days
+    past_rows = conn.execute(
+        "SELECT date, key, peak_pct, avg_pct, limit_hits, samples "
+        "FROM daily_stats WHERE date >= ? ORDER BY date",
+        (cutoff_90,),
+    ).fetchall()
+
+    # Today's live data
+    today_stats = _get_today_stats(conn)
+
+    # Merge into per-key and per-day structures
+    per_key: dict[str, list[dict]] = {}
+    per_day: dict[str, int] = {}  # date -> max avg across all providers (daily metric)
+    per_day_detail: dict[str, dict] = {}  # date -> {key: {peak_pct, avg_pct}}
+
+    for date, key, peak, avg, hits, cnt in past_rows:
+        per_key.setdefault(key, []).append({
+            "date": date, "peak_pct": peak, "avg_pct": avg,
+            "limit_hits": hits, "samples": cnt,
+        })
+        per_day[date] = max(per_day.get(date, 0), avg)
+        per_day_detail.setdefault(date, {})[key] = {"peak_pct": peak, "avg_pct": avg}
+
+    for key, stat in today_stats.items():
+        per_key.setdefault(key, []).append(stat)
+        per_day[today] = max(per_day.get(today, 0), stat["avg_pct"])
+        per_day_detail.setdefault(today, {})[key] = {
+            "peak_pct": stat["peak_pct"], "avg_pct": stat["avg_pct"],
+        }
+
+    # Intraday 5-hour windows for today (from raw samples)
+    today_windows: dict[str, dict[int, int]] = {}
+    try:
+        raw = conn.execute(
+            "SELECT key, ts, pct FROM samples WHERE date(ts, 'unixepoch') = ? ORDER BY ts",
+            (today,),
+        ).fetchall()
+        for key, ts, pct in raw:
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            widx = min(dt.hour // 5, 4)
+            bucket = today_windows.setdefault(key, {})
+            bucket[widx] = max(bucket.get(widx, 0), pct)
+    except Exception:
+        log.debug("Failed to fetch intraday windows", exc_info=True)
+
+    if not per_day:
+        return None
+
+    # Build provider summaries
+    _day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    providers = []
+    for key in sorted(per_key):
+        stats = per_key[key]
+        peaks = [d["peak_pct"] for d in stats]
+        avgs = [d["avg_pct"] for d in stats]
+        avg_val = round(sum(avgs) / len(avgs)) if avgs else 0
+        peak_val = max(peaks) if peaks else 0
+        total_hits = sum(d["limit_hits"] for d in stats)
+        # Color: use parent provider color for sub-keys
+        color = _HISTORY_COLORS.get(key)
+        if color is None:
+            for prefix in ("chatgpt", "cursor", "claude", "copilot"):
+                if key.startswith(prefix):
+                    color = _HISTORY_COLORS[prefix]
+                    break
+            else:
+                color = "#AAAAAA"
+        label = (key.replace("_", " ").title()
+                 .replace("Chatgpt", "ChatGPT").replace("Api", "API"))
+
+        # Last 7 days for bar chart
+        cutoff_7 = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
+        weekly = [d for d in stats if d["date"] >= cutoff_7]
+
+        providers.append({
+            "key": key, "label": label, "color": color,
+            "weekly": weekly, "avg": avg_val, "peak": peak_val, "hits": total_hits,
+        })
+
+    # Summary
+    all_peaks = list(per_day.items())
+    highest = max(all_peaks, key=lambda x: x[1])
+    lowest = min(all_peaks, key=lambda x: x[1])
+    avg_overall = round(sum(v for _, v in all_peaks) / len(all_peaks)) if all_peaks else 0
+    total_hits = sum(p["hits"] for p in providers)
+    earliest = min(per_day.keys())
+
+    def _fmt_day(date_str):
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return f"{_day_names[dt.weekday()]} {dt.strftime('%b %d')}"
+        except Exception:
+            return date_str
+
+    return {
+        "days": per_day,
+        "providers": providers,
+        "per_day_detail": per_day_detail,
+        "today_windows": today_windows,
+        "summary": {
+            "total_days": len(per_day),
+            "earliest": earliest,
+            "highest": (_fmt_day(highest[0]), highest[1]),
+            "lowest": (_fmt_day(lowest[0]), lowest[1]),
+            "avg": avg_overall,
+            "total_hits": total_hits,
+        },
+    }
 
 
 # ── config ────────────────────────────────────────────────────────────────────
@@ -1140,6 +1421,425 @@ def _show_welcome_window(gif_path: str, widget_installed: bool) -> None:
     _show_welcome_window._active_win = win
 
 
+def _ensure_history_handler():
+    """Lazily create an ObjC click handler for heatmap cells."""
+    h = getattr(_ensure_history_handler, '_inst', None)
+    if h is not None:
+        return h
+    try:
+        from AppKit import NSObject
+
+        class _HMapHandler(NSObject):
+            def cellClicked_(self, sender):
+                fn = getattr(type(self), '_on_click', None)
+                if fn:
+                    fn(sender.tag())
+        _ensure_history_handler._inst = _HMapHandler.alloc().init()
+    except Exception:
+        log.debug("Failed to create history click handler", exc_info=True)
+        _ensure_history_handler._inst = None
+    return _ensure_history_handler._inst
+
+
+def _show_history_window(conn: sqlite3.Connection) -> None:
+    """Show a native macOS Usage History window with heatmap, stats, and charts."""
+    from AppKit import (
+        NSWindow, NSTextField, NSFont, NSColor, NSView, NSScrollView,
+        NSButton, NSMakeRect, NSWindowStyleMaskTitled, NSWindowStyleMaskClosable,
+        NSWindowStyleMaskFullSizeContentView, NSBackingStoreBuffered,
+        NSTextAlignmentCenter, NSTextAlignmentLeft,
+        NSApplication, NSFloatingWindowLevel, NSScreen,
+        NSVisualEffectView,
+    )
+    import Quartz
+
+    # Reuse existing window if open
+    existing = getattr(_show_history_window, "_active_win", None)
+    if existing is not None:
+        try:
+            existing.makeKeyAndOrderFront_(None)
+            NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+            return
+        except Exception:
+            pass
+
+    data = _fetch_history_data(conn)
+    if data is None:
+        return
+
+    WIN_W = 560
+    WIN_H = 680
+    PAD = 28
+    inner_w = WIN_W - PAD * 2
+
+    summary = data["summary"]
+    days = data["days"]
+    per_day_detail = data.get("per_day_detail", {})
+    today_windows = data.get("today_windows", {})
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Only show providers that have actual usage data
+    providers = [p for p in data["providers"] if p["peak"] > 0]
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+
+    def _cg(hex_str, alpha=1.0):
+        h = hex_str.lstrip("#")
+        r, g, b = int(h[0:2], 16) / 255, int(h[2:4], 16) / 255, int(h[4:6], 16) / 255
+        return Quartz.CGColorCreateGenericRGB(r, g, b, alpha)
+
+    dark_bg = _cg("#1C1C2A")
+    card_bg = _cg("#232336")
+    track_bg = _cg("#1C1C2A")
+    dim = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.55, 0.55, 0.6, 1.0)
+    dimmer = NSColor.colorWithCalibratedRed_green_blue_alpha_(0.4, 0.4, 0.45, 1.0)
+
+    # ── Precompute heatmap cell sizing (needed for doc_h) ────────────────
+    today = datetime.now(timezone.utc).date()
+    _hm_start = today - timedelta(days=89)
+    _hm_start -= timedelta(days=_hm_start.weekday())
+    _hm_num_days = (today - _hm_start).days + 1
+    _hm_num_cols = (_hm_num_days + 6) // 7
+    DAY_LABEL_W = 32
+    _hm_avail = inner_w - DAY_LABEL_W
+    HGAP = 3
+    CELL = max(10, int((_hm_avail - HGAP * (_hm_num_cols - 1)) / _hm_num_cols))
+    HSTEP = CELL + HGAP
+
+    # ── Compute total content height ─────────────────────────────────────
+    HEATMAP_H = 7 * HSTEP + 14 + CELL + 8  # 7 rows + month labels + legend
+    CARD_H = 60
+    BAR_H = 14
+    BAR_GAP = 5
+    INTRADAY_BLOCK = 20 + 5 * (BAR_H + BAR_GAP) + 8
+
+    doc_h = PAD + 16          # top padding (below titlebar)
+    doc_h += 32 + 22          # title + subtitle
+    doc_h += 16 + HEATMAP_H   # gap + heatmap
+    doc_h += 24               # day info row below heatmap
+    doc_h += 24 + CARD_H      # gap + stat cards
+    PROV_HEADER = 22 + 18     # colored dot/name + summary line
+    for p in providers:
+        doc_h += 24 + PROV_HEADER
+        if p["key"] in today_windows:
+            doc_h += INTRADAY_BLOCK
+        else:
+            doc_h += 7 * (BAR_H + BAR_GAP) + 16
+    doc_h += 24 + 20 + PAD    # gap + footer + bottom pad
+    doc_h = max(doc_h, WIN_H)
+
+    # Placement helpers: top_y is logical offset from top, converted to
+    # NSView bottom-up coordinates via  real_y = parent_h - top_y - h
+
+    def _v(parent, x, top_y, w, h, bg=None, corner=0, ph=None, tooltip=None):
+        real_y = (ph or doc_h) - top_y - h
+        v = NSView.alloc().initWithFrame_(NSMakeRect(x, real_y, w, h))
+        v.setWantsLayer_(True)
+        if bg:
+            v.layer().setBackgroundColor_(bg)
+        if corner:
+            v.layer().setCornerRadius_(corner)
+            v.layer().setMasksToBounds_(True)
+        if tooltip:
+            v.setToolTip_(tooltip)
+        parent.addSubview_(v)
+        return v
+
+    def _lbl(parent, text, x, top_y, w, h=0, size=12, weight=0.0,
+             color=None, align=NSTextAlignmentLeft, mono=False, ph=None):
+        if h == 0:
+            h = int(size * 1.5 + 2)
+        real_y = (ph or doc_h) - top_y - h
+        lbl = NSTextField.alloc().initWithFrame_(NSMakeRect(x, real_y, w, h))
+        lbl.setStringValue_(text)
+        lbl.setBezeled_(False)
+        lbl.setDrawsBackground_(False)
+        lbl.setEditable_(False)
+        lbl.setSelectable_(False)
+        lbl.setAlignment_(align)
+        if mono:
+            lbl.setFont_(NSFont.monospacedDigitSystemFontOfSize_weight_(size, weight))
+        else:
+            lbl.setFont_(NSFont.systemFontOfSize_weight_(size, weight))
+        lbl.setTextColor_(color or NSColor.labelColor())
+        parent.addSubview_(lbl)
+        return lbl
+
+    # ── Build window ─────────────────────────────────────────────────────
+    screen = NSScreen.mainScreen().frame()
+    sx = (screen.size.width - WIN_W) / 2
+    sy = (screen.size.height - WIN_H) / 2
+
+    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+        NSMakeRect(sx, sy, WIN_W, WIN_H),
+        (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+         | NSWindowStyleMaskFullSizeContentView),
+        NSBackingStoreBuffered,
+        False,
+    )
+    win.setTitle_("")
+    win.setTitlebarAppearsTransparent_(True)
+    win.setTitleVisibility_(1)
+    win.setLevel_(NSFloatingWindowLevel)
+    win.setMovableByWindowBackground_(True)
+
+    content = win.contentView()
+    content.setWantsLayer_(True)
+
+    blur = NSVisualEffectView.alloc().initWithFrame_(content.bounds())
+    blur.setAutoresizingMask_(18)
+    blur.setBlendingMode_(0)
+    blur.setMaterial_(3)
+    blur.setState_(1)
+    content.addSubview_(blur)
+
+    scroll = NSScrollView.alloc().initWithFrame_(content.bounds())
+    scroll.setAutoresizingMask_(18)
+    scroll.setHasVerticalScroller_(True)
+    scroll.setDrawsBackground_(False)
+    scroll.setBorderType_(0)
+    content.addSubview_(scroll)
+
+    doc = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, WIN_W, doc_h))
+    scroll.setDocumentView_(doc)
+
+    # ── Layout (top-down y cursor) ───────────────────────────────────────
+    y = PAD + 16
+
+    # Title
+    _lbl(doc, "Usage History", PAD, y, inner_w, size=22, weight=0.56)
+    y += 32
+    _lbl(doc, f"Average daily usage across all providers  \u00b7  {summary['total_days']} days tracked",
+         PAD, y, inner_w, size=12, color=dim)
+    y += 30
+
+    # ── Heatmap (hero section — fills available width) ──────────────────
+    HLEFT = PAD + DAY_LABEL_W
+    hm_top = y
+    start = _hm_start
+
+    # Day labels
+    for row, dl in enumerate(["Mon", "", "Wed", "", "Fri", "", "Sun"]):
+        if dl:
+            _lbl(doc, dl, PAD, hm_top + row * HSTEP + 1, DAY_LABEL_W - 4,
+                 size=9, color=dimmer)
+
+    # Cells (interactive NSButtons for click-to-inspect)
+    handler = _ensure_history_handler()
+    date_for_tag = {}  # tag -> date_str
+    tag_counter = [0]
+
+    current = start
+    col = 0
+    last_month = -1
+    while current <= today:
+        row = current.weekday()
+        cx = HLEFT + col * HSTEP
+        cy = hm_top + row * HSTEP
+
+        if current.month != last_month and row == 0:
+            _lbl(doc, current.strftime("%b"), cx, hm_top - 14, 40,
+                 size=9, color=dimmer)
+            last_month = current.month
+
+        ds = current.strftime("%Y-%m-%d")
+        pct = days.get(ds, -1)
+        if pct < 0:
+            cc = dark_bg
+            tip = f"{ds}  \u2013  No data"
+        else:
+            t = min(pct / 100, 1.0)
+            r = 0.14 + t * 0.71
+            g = 0.14 + t * 0.33
+            b = 0.20 + t * 0.14
+            cc = Quartz.CGColorCreateGenericRGB(r, g, b, 1.0)
+            tip = f"{ds}  \u2013  Peak {pct}%"
+
+        tag = tag_counter[0]
+        tag_counter[0] += 1
+        date_for_tag[tag] = ds
+
+        real_y = doc_h - cy - CELL
+        btn = NSButton.alloc().initWithFrame_(NSMakeRect(cx, real_y, CELL, CELL))
+        btn.setBordered_(False)
+        btn.setTitle_("")
+        btn.setWantsLayer_(True)
+        btn.layer().setBackgroundColor_(cc)
+        btn.layer().setCornerRadius_(3)
+        btn.layer().setMasksToBounds_(True)
+        btn.setToolTip_(tip)
+        if handler:
+            btn.setTarget_(handler)
+            btn.setAction_(b"cellClicked:")
+            btn.setTag_(tag)
+        doc.addSubview_(btn)
+
+        if row == 6:
+            col += 1
+        current += timedelta(days=1)
+
+    # Legend
+    legend_y = hm_top + 7 * HSTEP + 8
+    lx = HLEFT
+    _lbl(doc, "Less", lx - 30, legend_y + 1, 28, size=9, color=dimmer)
+    for lv in [0, 25, 50, 75, 100]:
+        t = lv / 100
+        lr = 0.14 + t * 0.71
+        lg = 0.14 + t * 0.33
+        lb = 0.20 + t * 0.14
+        _v(doc, lx, legend_y, CELL, CELL,
+           Quartz.CGColorCreateGenericRGB(lr, lg, lb, 1.0), corner=3)
+        lx += HSTEP
+    _lbl(doc, "More", lx + 3, legend_y + 1, 30, size=9, color=dimmer)
+
+    y = legend_y + CELL + 16
+
+    # ── Selected Day info row (updatable on click) ────────────────────
+    _day_names_fmt = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    def _fmt_date_label(ds):
+        try:
+            dt = datetime.strptime(ds, "%Y-%m-%d")
+            return f"{_day_names_fmt[dt.weekday()]} {dt.strftime('%b %d')}"
+        except Exception:
+            return ds
+
+    today_detail = per_day_detail.get(today_str, {})
+    info_parts = []
+    for key, stats in sorted(today_detail.items()):
+        lbl_name = (key.replace("_", " ").title()
+                    .replace("Chatgpt", "ChatGPT").replace("Api", "API"))
+        info_parts.append(f"{lbl_name} {stats['avg_pct']}%")
+    initial_info = (f"{_fmt_date_label(today_str)}  \u2014  "
+                    + "  \u00b7  ".join(info_parts)) if info_parts else "Click a cell to see day details"
+
+    info_label = _lbl(doc, initial_info, PAD, y, inner_w, size=11, color=dim)
+    y += 24
+
+    # Wire click handler to update info label
+    if handler:
+        def _on_click(tag):
+            ds = date_for_tag.get(tag, "")
+            if not ds:
+                return
+            detail = per_day_detail.get(ds, {})
+            parts = []
+            for key, stats in sorted(detail.items()):
+                name = (key.replace("_", " ").title()
+                        .replace("Chatgpt", "ChatGPT").replace("Api", "API"))
+                parts.append(f"{name} {stats['avg_pct']}%")
+            text = f"{_fmt_date_label(ds)}  \u2014  "
+            text += "  \u00b7  ".join(parts) if parts else "No data"
+            info_label.setStringValue_(text)
+        type(handler)._on_click = _on_click
+
+    # ── Stats Cards ──────────────────────────────────────────────────────
+    CARD_GAP = 10
+    card_w = (inner_w - CARD_GAP * 3) / 4
+    cards = [
+        (f"{summary['highest'][1]}%", "Highest Day", summary["highest"][0], "#D97757"),
+        (f"{summary['lowest'][1]}%", "Lowest Day", summary["lowest"][0], "#74AA9C"),
+        (f"{summary['avg']}%", "Daily Avg", "", "#6E40C9"),
+        (f"{summary['total_hits']}x", "Hit Limit", "", "#00A0D1"),
+    ]
+    for i, (val, lbl, sub, clr) in enumerate(cards):
+        cx = PAD + i * (card_w + CARD_GAP)
+        card = _v(doc, cx, y, card_w, CARD_H, card_bg, corner=10)
+        # Accent bar
+        _v(card, 0, 8, 3, CARD_H - 16, _cg(clr), corner=1.5, ph=CARD_H)
+        # Value
+        _lbl(card, val, 12, 10, card_w - 16, size=17, weight=0.56, mono=True, ph=CARD_H)
+        # Label
+        _lbl(card, lbl, 12, 32, card_w - 16, size=10, color=dim, ph=CARD_H)
+        # Sub-label
+        if sub:
+            _lbl(card, sub, 12, 44, card_w - 16, size=9, color=dimmer, ph=CARD_H)
+
+    y += CARD_H + 24
+
+    # ── Per-provider sections (only those with data) ─────────────────────
+    _day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    BLABEL_W = 32
+    BPCT_W = 38
+
+    # Metric context: what the % means for each provider key
+    _metric_hint = {
+        "claude": "5-hour session window",
+        "copilot": "rate limit",
+    }
+
+    for prov in providers:
+        # Colored dot + name
+        _v(doc, PAD, y + 5, 8, 8, _cg(prov["color"]), corner=4)
+        _lbl(doc, prov["label"], PAD + 14, y, 250, size=14, weight=0.5)
+        # Metric hint next to name
+        hint = _metric_hint.get(prov["key"], "rate limit")
+        _lbl(doc, hint, PAD + 14 + len(prov["label"]) * 9, y + 2, 200,
+             size=10, color=dimmer)
+        y += 22
+
+        # Summary
+        stxt = f"Avg {prov['avg']}%  \u00b7  Peak {prov['peak']}%"
+        if prov["hits"] > 0:
+            stxt += f"  \u00b7  Hit limit {prov['hits']}x"
+        _lbl(doc, stxt, PAD, y, inner_w, size=11, color=dim)
+        y += 18
+
+        bar_area = inner_w - BLABEL_W - BPCT_W - 8
+        accent = _cg(prov["color"])
+
+        # Intraday 5h windows replace the 7-day chart when available
+        prov_windows = today_windows.get(prov["key"], {})
+        if prov_windows:
+            _lbl(doc, "Today\u2019s Sessions", PAD, y, inner_w, size=11, weight=0.4, color=dim)
+            y += 20
+            window_labels = ["00\u201305h", "05\u201310h", "10\u201315h", "15\u201320h", "20\u201324h"]
+            for widx in range(5):
+                wpct = prov_windows.get(widx, 0)
+                wy = y + widx * (BAR_H + BAR_GAP)
+                _lbl(doc, window_labels[widx], PAD, wy + 1, BLABEL_W + 10,
+                     h=BAR_H, size=9, color=dim)
+                _v(doc, PAD + BLABEL_W + 10, wy, bar_area - 10, BAR_H, track_bg, corner=4)
+                if wpct > 0:
+                    bw = max(6, (bar_area - 10) * wpct / 100)
+                    _v(doc, PAD + BLABEL_W + 10, wy, bw, BAR_H, accent, corner=4)
+                _lbl(doc, f"{wpct}%", PAD + BLABEL_W + bar_area + 6, wy + 1, BPCT_W,
+                     h=BAR_H, size=10, weight=0.3, color=dim, mono=True)
+            y += 5 * (BAR_H + BAR_GAP) + 8
+        else:
+            # 7-day bar chart (fallback when no intraday data)
+            day_data = {d["date"]: d["peak_pct"] for d in prov["weekly"]}
+            for i in range(7):
+                day = today - timedelta(days=6 - i)
+                ds = day.strftime("%Y-%m-%d")
+                pct = day_data.get(ds, 0)
+                by = y + i * (BAR_H + BAR_GAP)
+
+                _lbl(doc, _day_names[day.weekday()], PAD, by + 1, BLABEL_W,
+                     h=BAR_H, size=10, color=dim)
+                _v(doc, PAD + BLABEL_W, by, bar_area, BAR_H, track_bg, corner=4)
+                if pct > 0:
+                    bw = max(6, bar_area * pct / 100)
+                    _v(doc, PAD + BLABEL_W, by, bw, BAR_H, accent, corner=4)
+                _lbl(doc, f"{pct}%", PAD + BLABEL_W + bar_area + 6, by + 1, BPCT_W,
+                     h=BAR_H, size=10, weight=0.3, color=dim, mono=True)
+            y += 7 * (BAR_H + BAR_GAP) + 16
+
+    # ── Footer ───────────────────────────────────────────────────────────
+    _lbl(doc, f"Data since {summary['earliest']}  \u00b7  {summary['total_days']} days tracked",
+         PAD, y, inner_w, size=10, color=dimmer, align=NSTextAlignmentCenter)
+
+    # ── Scroll to top ────────────────────────────────────────────────────
+    visible_h = scroll.contentSize().height
+    if doc_h > visible_h:
+        clip = scroll.contentView()
+        clip.scrollToPoint_((0, doc_h - visible_h))
+        scroll.reflectScrolledClipView_(clip)
+
+    win.makeKeyAndOrderFront_(None)
+    NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+    _show_history_window._active_win = win
+
+
 def _fmt_count(n: int) -> str:
     """Format a message count compactly: 1234 → '1.2k', 999 → '999'."""
     if n >= 1000:
@@ -1521,6 +2221,13 @@ class ClaudeBar(rumps.App):
         self._cc_stats: dict | None = None   # Claude Code local stats
         self._history = _load_history()       # usage history for burn rate / sparkline
         self._pacing_alerted: set[str] = set()  # track which providers we've pacing-alerted
+        self._history_db = _init_history_db()
+        self._last_rollup = 0
+        try:
+            _rollup_daily_stats(self._history_db)
+            self._last_rollup = time.time()
+        except Exception:
+            log.exception("startup rollup failed")
 
         # Thread-safe UI update queue (background thread → main thread)
         self._ui_pending_title: str | None = None
@@ -1563,6 +2270,16 @@ class ClaudeBar(rumps.App):
                 eta = _calc_eta_minutes(self._history, "claude")
                 if eta is not None:
                     items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
+                spark = _sparkline(self._history, "claude")
+                if spark:
+                    items.append(_mi(f"  {spark}"))
+                    items.append(_mi(f"  📈 24h usage trend"))
+                try:
+                    hits = _get_week_limit_hits(self._history_db, "claude")
+                except Exception:
+                    hits = 0
+                if hits > 0:
+                    items.append(_mi(f"  Hit limit {hits}x this week"))
                 items.append(None)
 
             for row in [data.weekly_all, data.weekly_sonnet]:
@@ -1594,6 +2311,16 @@ class ClaudeBar(rumps.App):
                     eta = _calc_eta_minutes(self._history, hkey)
                     if eta is not None:
                         items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
+                    spark = _sparkline(self._history, hkey)
+                    if spark:
+                        items.append(_mi(f"  {spark}"))
+                        items.append(_mi(f"  📈 24h usage trend"))
+                    try:
+                        hits = _get_week_limit_hits(self._history_db, hkey)
+                    except Exception:
+                        hits = 0
+                    if hits > 0:
+                        items.append(_mi(f"  Hit limit {hits}x this week"))
                     items.append(None)
             else:
                 for line in _provider_lines(chatgpt_pd):
@@ -1614,6 +2341,16 @@ class ClaudeBar(rumps.App):
             eta = _calc_eta_minutes(self._history, "copilot")
             if eta is not None:
                 items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
+            spark = _sparkline(self._history, "copilot")
+            if spark:
+                items.append(_mi(f"  {spark}"))
+                items.append(_mi(f"  📈 24h usage trend"))
+            try:
+                hits = _get_week_limit_hits(self._history_db, "copilot")
+            except Exception:
+                hits = 0
+            if hits > 0:
+                items.append(_mi(f"  Hit limit {hits}x this week"))
             items.append(None)
 
         # ── ◇  CURSOR section (if detected) ──────────────────────────────────
@@ -1632,6 +2369,16 @@ class ClaudeBar(rumps.App):
                     eta = _calc_eta_minutes(self._history, hkey)
                     if eta is not None:
                         items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
+                    spark = _sparkline(self._history, hkey)
+                    if spark:
+                        items.append(_mi(f"  {spark}"))
+                        items.append(_mi(f"  📈 24h usage trend"))
+                    try:
+                        hits = _get_week_limit_hits(self._history_db, hkey)
+                    except Exception:
+                        hits = 0
+                    if hits > 0:
+                        items.append(_mi(f"  Hit limit {hits}x this week"))
                     items.append(None)
             else:
                 for line in _provider_lines(cursor_pd):
@@ -1669,6 +2416,21 @@ class ClaudeBar(rumps.App):
                 if line:
                     items.append(_mi(line))
             items.append(None)
+
+        # ── Usage History window ──────────────────────────────────────────
+        try:
+            today_stats = _get_today_stats(self._history_db)
+            past_keys = {r[0] for r in self._history_db.execute(
+                "SELECT DISTINCT key FROM daily_stats"
+            ).fetchall()}
+            has_history = bool(past_keys or today_stats)
+            if has_history:
+                items.append(rumps.MenuItem(
+                    "Usage History\u2026", callback=self._open_history_window,
+                ))
+                items.append(None)
+        except Exception:
+            log.exception("Usage History menu item failed")
 
         # ── Footer ────────────────────────────────────────────────────────
         if self._last_updated:
@@ -1950,6 +2712,27 @@ class ClaudeBar(rumps.App):
             if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
                 _append_history(self._history, "copilot", copilot_pd.pct)
             _save_history(self._history)
+
+            # ── record to SQLite history ──
+            try:
+                if data.session:
+                    _record_sample(self._history_db, "claude", data.session.pct)
+                for prefix, pname in [("chatgpt", "ChatGPT"), ("cursor", "Cursor")]:
+                    pd = next((p for p in self._provider_data if p.name == pname), None)
+                    if pd and not pd.error:
+                        rows = getattr(pd, "_rows", None)
+                        if rows:
+                            for row in rows:
+                                hkey = f"{prefix}_{row.label.lower().replace(' ', '_')}"
+                                _record_sample(self._history_db, hkey, row.pct)
+                if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
+                    _record_sample(self._history_db, "copilot", copilot_pd.pct)
+                # Periodic rollup (every hour)
+                if time.time() - self._last_rollup > 3600:
+                    _rollup_daily_stats(self._history_db)
+                    self._last_rollup = time.time()
+            except Exception:
+                log.exception("SQLite history recording failed")
 
             self._check_pacing_alerts()
 
@@ -2285,6 +3068,12 @@ class ClaudeBar(rumps.App):
     def _open_usage_page(self, _sender):
         subprocess.Popen(["open", "https://claude.ai/settings/usage"])
 
+    def _open_history_window(self, _sender):
+        try:
+            _show_history_window(self._history_db)
+        except Exception:
+            log.exception("Failed to open history window")
+
     def _open_github(self, _sender):
         subprocess.Popen(["open", "https://github.com/yagcioglutoprak/AIQuotaBar"])
 
@@ -2591,5 +3380,75 @@ class ClaudeBar(rumps.App):
             )
 
 
+def _cli_history():
+    """Print a 7-day usage history chart to the terminal."""
+    if not os.path.exists(HISTORY_DB):
+        print("No history data yet. Run AIQuotaBar for a while first.")
+        return
+
+    conn = sqlite3.connect(HISTORY_DB)
+    keys = [r[0] for r in conn.execute(
+        "SELECT DISTINCT key FROM daily_stats ORDER BY key"
+    ).fetchall()]
+
+    if not keys:
+        print("No history data yet. Run AIQuotaBar for a while first.")
+        conn.close()
+        return
+
+    # ANSI color map per provider prefix
+    _colors = {
+        "claude": "\033[38;5;209m",   # orange
+        "chatgpt": "\033[38;5;114m",  # green
+        "copilot": "\033[38;5;141m",  # purple
+        "cursor": "\033[38;5;45m",    # cyan
+    }
+    _reset = "\033[0m"
+    _dim = "\033[2m"
+    _bold = "\033[1m"
+
+    print(f"\n{_bold}  AIQuotaBar — 7-Day Usage History{_reset}\n")
+
+    for key in keys:
+        stats = _get_weekly_stats(conn, key)
+        if not stats:
+            continue
+
+        # Determine color from key prefix
+        prefix = key.split("_")[0]
+        color = _colors.get(prefix, "")
+        label = key.replace("_", " ").title()
+
+        print(f"  {color}{_bold}{label}{_reset}")
+
+        bar_width = 30
+        for d in stats:
+            try:
+                day_name = datetime.strptime(d["date"], "%Y-%m-%d").strftime("%a")
+            except Exception:
+                day_name = d["date"][-5:]
+            pct = d["peak_pct"]
+            filled = round(pct / 100 * bar_width)
+            bar = "█" * filled + "░" * (bar_width - filled)
+            hit_mark = " ⚠" if d["limit_hits"] > 0 else ""
+            print(f"    {_dim}{day_name}{_reset}  {color}{bar}{_reset}  {pct}%{hit_mark}")
+
+        # Summary line
+        peaks = [d["peak_pct"] for d in stats]
+        avgs = [d["avg_pct"] for d in stats]
+        total_hits = sum(d["limit_hits"] for d in stats)
+        avg_all = round(sum(avgs) / len(avgs)) if avgs else 0
+        peak_all = max(peaks) if peaks else 0
+        summary = f"    avg {avg_all}%  ·  peak {peak_all}%"
+        if total_hits > 0:
+            summary += f"  ·  hit limit {total_hits}x"
+        print(f"  {_dim}{summary}{_reset}\n")
+
+    conn.close()
+
+
 if __name__ == "__main__":
-    ClaudeBar().run()
+    if len(sys.argv) > 1 and sys.argv[1] in ("--history", "-H"):
+        _cli_history()
+    else:
+        ClaudeBar().run()
