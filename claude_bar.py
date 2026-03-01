@@ -70,6 +70,8 @@ _NOTIF_DEFAULTS = {
     "claude_pacing":  True,   # predictive alert when Claude ETA < 30 min
     "chatgpt_pacing": True,   # predictive alert when ChatGPT ETA < 30 min
     "copilot_pacing": True,   # predictive alert when Copilot ETA < 30 min
+    "cursor_warning": True,   # notify when Cursor usage crosses WARN/CRIT
+    "cursor_pacing":  True,   # predictive alert when Cursor ETA < 30 min
 }
 
 # ── usage history + burn rate ────────────────────────────────────────────────
@@ -508,19 +510,69 @@ def fetch_copilot(cookie_str: str) -> ProviderData:
         return ProviderData("Copilot", error=str(e)[:80])
 
 
+def fetch_cursor(cookie_str: str) -> ProviderData:
+    """Fetch Cursor IDE usage via browser cookies (WorkOS session)."""
+    cookies = parse_cookie_string(cookie_str)
+    try:
+        r = requests.get(
+            "https://cursor.com/api/usage-summary",
+            cookies=_strip_cf_cookies(cookies),
+            headers={
+                "Accept": "application/json",
+                "Referer": "https://cursor.com/dashboard?tab=usage",
+            },
+            timeout=10,
+            impersonate=_IMPERSONATE,
+        )
+        r.raise_for_status()
+        data = r.json()
+        log.debug("cursor usage-summary: %s", json.dumps(data, indent=2))
+        plan = (data.get("individualUsage") or {}).get("plan") or {}
+        auto_pct = int(round(float(plan.get("autoPercentUsed", 0))))
+        api_pct = int(round(float(plan.get("apiPercentUsed", 0))))
+        total_pct = int(round(float(plan.get("totalPercentUsed", 0))))
+        # Build reset string from billingCycleEnd
+        reset_str = ""
+        cycle_end = data.get("billingCycleEnd")
+        if cycle_end:
+            try:
+                end_dt = datetime.fromisoformat(cycle_end.replace("Z", "+00:00"))
+                delta = end_dt - datetime.now(timezone.utc)
+                if delta.total_seconds() > 0:
+                    days = delta.days
+                    hours = delta.seconds // 3600
+                    if days > 0:
+                        reset_str = f"resets in {days}d {hours}h"
+                    else:
+                        reset_str = f"resets in {hours}h"
+            except (ValueError, TypeError):
+                pass
+        rows = [
+            LimitRow(label="Auto", pct=auto_pct, reset_str=reset_str),
+            LimitRow(label="API", pct=api_pct, reset_str=reset_str),
+        ]
+        pd = ProviderData("Cursor", spent=float(total_pct), limit=100.0, currency="")
+        pd._rows = rows
+        return pd
+    except Exception as e:
+        log.debug("fetch_cursor failed: %s", e)
+        return ProviderData("Cursor", error=str(e)[:80])
+
+
 # Registry: config_key → (display_name, fetch_fn)
 # chatgpt_cookies / copilot_cookies are cookie-based (auto-detected);
 # others are API key-based.
 PROVIDER_REGISTRY: dict[str, tuple[str, callable]] = {
     "chatgpt_cookies": ("ChatGPT",     fetch_chatgpt),
     "copilot_cookies": ("Copilot",     fetch_copilot),
+    "cursor_cookies":  ("Cursor",      fetch_cursor),
     "openai_key":      ("OpenAI",      fetch_openai),
     "minimax_key":     ("MiniMax",     fetch_minimax),
     "glm_key":         ("GLM (Zhipu)", fetch_glm),
 }
 
 # Cookie-based providers (auto-detected from browser, not manually entered)
-_COOKIE_PROVIDERS = {"chatgpt_cookies", "copilot_cookies"}
+_COOKIE_PROVIDERS = {"chatgpt_cookies", "copilot_cookies", "cursor_cookies"}
 
 
 # ── time helpers ──────────────────────────────────────────────────────────────
@@ -705,6 +757,17 @@ def _write_widget_cache(
                 raw_rows = getattr(chatgpt_pd, "_rows", None) or []
                 chatgpt_rows = [_row_dict(r) for r in raw_rows]
 
+        # Cursor rows
+        cursor_pd = next((p for p in providers if p.name == "Cursor"), None)
+        cursor_rows = None
+        cursor_error = None
+        if cursor_pd:
+            if cursor_pd.error:
+                cursor_error = cursor_pd.error
+            else:
+                raw_rows = getattr(cursor_pd, "_rows", None) or []
+                cursor_rows = [_row_dict(r) for r in raw_rows]
+
         payload = {
             "version": 1,
             "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -717,6 +780,10 @@ def _write_widget_cache(
             "chatgpt": {
                 "rows": chatgpt_rows,
                 "error": chatgpt_error,
+            },
+            "cursor": {
+                "rows": cursor_rows,
+                "error": cursor_error,
             },
             "claude_code": {
                 "today_messages": (cc_stats or {}).get("today_messages", 0),
@@ -1271,6 +1338,13 @@ def _auto_detect_copilot_cookies() -> str | None:
     return _run_cookie_detection("github.com", "user_session")
 
 
+def _auto_detect_cursor_cookies() -> str | None:
+    """Detect cursor.com session cookies from the browser (crash-safe subprocess)."""
+    if not _BROWSER_COOKIE3_OK:
+        return None
+    return _run_cookie_detection("cursor.com", "WorkosCursorSessionToken")
+
+
 def _notify(title: str, subtitle: str, message: str = ""):
     """rumps.notification wrapper — silently swallows if the notification
     center is unavailable (e.g. missing Info.plist in dev environments)."""
@@ -1408,6 +1482,29 @@ class ClaudeBar(rumps.App):
                 items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
             items.append(None)
 
+        # ── ◇  CURSOR section (if detected) ──────────────────────────────────
+        cursor_pd = next(
+            (pd for pd in self._provider_data if pd.name == "Cursor"), None
+        )
+        if cursor_pd:
+            items.append(_section_header_mi("  Cursor", None, "#00A0D1"))
+            rows = getattr(cursor_pd, "_rows", None)
+            if rows:
+                for row in rows:
+                    lines = _row_lines(row)
+                    items.append(_mi(lines[0]))
+                    items.append(_colored_mi(lines[1], "#00A0D1"))
+                    items.append(None)
+            else:
+                for line in _provider_lines(cursor_pd):
+                    if line:
+                        items.append(_mi(line))
+                items.append(None)
+            eta = _calc_eta_minutes(self._history, "cursor")
+            if eta is not None:
+                items.append(_mi(f"  ⏱ Limit in ~{_fmt_eta(eta)}"))
+                items.append(None)
+
         # ── ◆  CLAUDE CODE section ────────────────────────────────────────────
         if self._cc_stats:
             cc = self._cc_stats
@@ -1430,7 +1527,7 @@ class ClaudeBar(rumps.App):
 
         # ── Other API providers ────────────────────────────────────────────
         for pd in self._provider_data:
-            if pd.name in ("ChatGPT", "Copilot"):
+            if pd.name in ("ChatGPT", "Copilot", "Cursor"):
                 continue
             items.append(_mi(f"  {pd.name}"))
             items.append(None)
@@ -1470,6 +1567,8 @@ class ClaudeBar(rumps.App):
             ("chatgpt_reset",   "ChatGPT — reset alerts"),
             ("chatgpt_pacing",  "ChatGPT — pacing alert (ETA < 30 min)"),
             ("copilot_pacing",  "Copilot — pacing alert (ETA < 30 min)"),
+            ("cursor_warning",  "Cursor — usage warnings (80% / 95%)"),
+            ("cursor_pacing",   "Cursor — pacing alert (ETA < 30 min)"),
         ]
         for nkey, nlabel in _notif_labels:
             item = rumps.MenuItem(nlabel, callback=self._make_notif_toggle_cb(nkey))
@@ -1681,6 +1780,14 @@ class ClaudeBar(rumps.App):
             )
             if copilot_pd and not copilot_pd.error and copilot_pd.pct is not None:
                 _append_history(self._history, "copilot", copilot_pd.pct)
+            cursor_pd = next(
+                (pd for pd in self._provider_data if pd.name == "Cursor"), None
+            )
+            if cursor_pd and not cursor_pd.error:
+                rows = getattr(cursor_pd, "_rows", None)
+                if rows:
+                    worst = max(r.pct for r in rows)
+                    _append_history(self._history, "cursor", worst)
             _save_history(self._history)
 
             self._check_pacing_alerts()
@@ -1768,52 +1875,57 @@ class ClaudeBar(rumps.App):
             self._prev_pcts[key] = row.pct
 
     def _check_provider_warnings(self, provider_data: list):
-        """Send macOS notification when ChatGPT rate limits cross a threshold or reset."""
-        chatgpt_pd = next((pd for pd in provider_data if pd.name == "ChatGPT"), None)
-        if chatgpt_pd is None or chatgpt_pd.error:
-            return
+        """Send macOS notification when provider rate limits cross a threshold or reset."""
+        _warn_providers = [
+            ("ChatGPT", "chatgpt", "chatgpt_warning", "chatgpt_reset"),
+            ("Cursor",  "cursor",  "cursor_warning",  None),
+        ]
+        for pname, prefix, warn_nkey, reset_nkey in _warn_providers:
+            pd = next((p for p in provider_data if p.name == pname), None)
+            if pd is None or pd.error:
+                continue
 
-        rows = getattr(chatgpt_pd, "_rows", None) or []
-        warn_enabled = _notif_enabled(self.config, "chatgpt_warning")
-        reset_enabled = _notif_enabled(self.config, "chatgpt_reset")
+            rows = getattr(pd, "_rows", None) or []
+            warn_enabled = _notif_enabled(self.config, warn_nkey)
+            reset_enabled = _notif_enabled(self.config, reset_nkey) if reset_nkey else False
 
-        for row in rows:
-            key = f"chatgpt_{row.label}"
-            warn_key = f"{key}_{WARN_THRESHOLD}"
-            crit_key = f"{key}_{CRIT_THRESHOLD}"
-            prev = self._prev_pcts.get(key)
+            for row in rows:
+                key = f"{prefix}_{row.label}"
+                warn_key = f"{key}_{WARN_THRESHOLD}"
+                crit_key = f"{key}_{CRIT_THRESHOLD}"
+                prev = self._prev_pcts.get(key)
 
-            if (reset_enabled and prev is not None
-                    and prev >= WARN_THRESHOLD and row.pct < WARN_THRESHOLD
-                    and (prev - row.pct) >= 10):
-                self._warned_pcts.discard(warn_key)
-                self._warned_pcts.discard(crit_key)
-                _notify(
-                    "Claude Usage Bar ✅",
-                    f"ChatGPT {row.label} has reset!",
-                    f"Now at {row.pct}% — you're good to go.",
-                )
-
-            if warn_enabled:
-                if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
-                    self._warned_pcts.add(crit_key)
-                    _notify(
-                        "Claude Usage Bar 🔴",
-                        f"ChatGPT {row.label} is at {row.pct}%!",
-                        row.reset_str or "Limit almost reached",
-                    )
-                elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
-                    self._warned_pcts.add(warn_key)
-                    _notify(
-                        "Claude Usage Bar 🟡",
-                        f"ChatGPT {row.label} is at {row.pct}%",
-                        row.reset_str or "Approaching limit",
-                    )
-                elif row.pct < WARN_THRESHOLD:
+                if (reset_enabled and prev is not None
+                        and prev >= WARN_THRESHOLD and row.pct < WARN_THRESHOLD
+                        and (prev - row.pct) >= 10):
                     self._warned_pcts.discard(warn_key)
                     self._warned_pcts.discard(crit_key)
+                    _notify(
+                        "Claude Usage Bar ✅",
+                        f"{pname} {row.label} has reset!",
+                        f"Now at {row.pct}% — you're good to go.",
+                    )
 
-            self._prev_pcts[key] = row.pct
+                if warn_enabled:
+                    if row.pct >= CRIT_THRESHOLD and crit_key not in self._warned_pcts:
+                        self._warned_pcts.add(crit_key)
+                        _notify(
+                            "Claude Usage Bar 🔴",
+                            f"{pname} {row.label} is at {row.pct}%!",
+                            row.reset_str or "Limit almost reached",
+                        )
+                    elif row.pct >= WARN_THRESHOLD and warn_key not in self._warned_pcts:
+                        self._warned_pcts.add(warn_key)
+                        _notify(
+                            "Claude Usage Bar 🟡",
+                            f"{pname} {row.label} is at {row.pct}%",
+                            row.reset_str or "Approaching limit",
+                        )
+                    elif row.pct < WARN_THRESHOLD:
+                        self._warned_pcts.discard(warn_key)
+                        self._warned_pcts.discard(crit_key)
+
+                self._prev_pcts[key] = row.pct
 
     def _check_pacing_alerts(self):
         """Send predictive notification when ETA drops below PACING_ALERT_MINUTES."""
@@ -1821,6 +1933,7 @@ class ClaudeBar(rumps.App):
             ("claude",  "claude_pacing",  "Claude session"),
             ("chatgpt", "chatgpt_pacing", "ChatGPT"),
             ("copilot", "copilot_pacing", "Copilot"),
+            ("cursor",  "cursor_pacing",  "Cursor"),
         ]
         for hkey, nkey, label in _pacing_map:
             if not _notif_enabled(self.config, nkey):
@@ -1951,6 +2064,7 @@ class ClaudeBar(rumps.App):
         _cookie_detectors = {
             "chatgpt_cookies": _auto_detect_chatgpt_cookies,
             "copilot_cookies": _auto_detect_copilot_cookies,
+            "cursor_cookies":  _auto_detect_cursor_cookies,
         }
         for cfg_key in _COOKIE_PROVIDERS:
             if not self.config.get(cfg_key):
@@ -1986,13 +2100,13 @@ class ClaudeBar(rumps.App):
             icon = _status_icon(pct)
             text = (
                 f"I'm at {pct}% of my Claude session limit {icon}\n"
-                f"Tracking Claude.ai + ChatGPT usage live in my macOS menu bar "
+                f"Tracking Claude + ChatGPT + Cursor usage live in my macOS menu bar "
                 f"— zero setup, auto-detects from browser\n"
                 f"github.com/yagcioglutoprak/AIQuotaBar"
             )
         else:
             text = (
-                "Track Claude.ai + ChatGPT usage live in your macOS menu bar "
+                "Track Claude + ChatGPT + Cursor usage live in your macOS menu bar "
                 "— zero setup, auto-detects from browser\n"
                 "github.com/yagcioglutoprak/AIQuotaBar"
             )
@@ -2006,6 +2120,7 @@ class ClaudeBar(rumps.App):
                 _detectors = {
                     "chatgpt_cookies": _auto_detect_chatgpt_cookies,
                     "copilot_cookies": _auto_detect_copilot_cookies,
+                    "cursor_cookies":  _auto_detect_cursor_cookies,
                 }
                 detect_fn = _detectors.get(cfg_key)
                 if detect_fn:
