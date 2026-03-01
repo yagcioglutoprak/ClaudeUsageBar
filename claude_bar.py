@@ -695,6 +695,58 @@ def _icon_astr(img, base_attrs: dict):
     return m
 
 
+# ── Sticky toggle view (menu stays open on click) ────────────────────────────
+
+_HAS_TOGGLE_VIEW = False
+try:
+    from AppKit import NSView, NSTextField, NSFont, NSColor, NSBezierPath, NSTrackingArea
+    from Foundation import NSMakeRect
+    import objc
+
+    _TRACK_FLAGS = 0x01 | 0x80   # mouseEnteredAndExited | activeInActiveApp
+
+    class _BarToggleView(NSView):
+        """Custom NSView for menu items — clicking does NOT dismiss the menu."""
+
+        def initWithFrame_(self, frame):
+            self = objc.super(_BarToggleView, self).initWithFrame_(frame)
+            if self:
+                self._action = None
+                self._label = None
+                self._hovering = False
+                area = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+                    self.bounds(), _TRACK_FLAGS, self, None,
+                )
+                self.addTrackingArea_(area)
+            return self
+
+        def mouseUp_(self, event):
+            if callable(self._action):
+                self._action()
+
+        def mouseEntered_(self, event):
+            self._hovering = True
+            self.setNeedsDisplay_(True)
+
+        def mouseExited_(self, event):
+            self._hovering = False
+            self.setNeedsDisplay_(True)
+
+        def drawRect_(self, rect):
+            if self._hovering:
+                NSColor.selectedMenuItemColor().set()
+                NSBezierPath.fillRect_(rect)
+                if self._label:
+                    self._label.setTextColor_(NSColor.selectedMenuItemTextColor())
+            else:
+                if self._label:
+                    self._label.setTextColor_(NSColor.labelColor())
+
+    _HAS_TOGGLE_VIEW = True
+except Exception:
+    pass
+
+
 # ── Claude Code local stats ───────────────────────────────────────────────────
 
 CC_STATS_FILE = os.path.expanduser("~/.claude/stats-cache.json")
@@ -733,6 +785,7 @@ def _write_widget_cache(
     data: UsageData,
     providers: list[ProviderData],
     cc_stats: dict | None,
+    config: dict | None = None,
 ) -> None:
     """Write current usage snapshot for the WidgetKit widget.
 
@@ -745,6 +798,43 @@ def _write_widget_cache(
             if row is None:
                 return None
             return {"label": row.label, "pct": row.pct, "reset_str": row.reset_str}
+
+        def _active_providers(cfg: dict) -> list[str]:
+            """Return list of provider IDs the user has configured."""
+            active = []
+            if cfg.get("cookie_str"):
+                active.append("claude")
+            _key_map = {
+                "chatgpt_cookies": "chatgpt",
+                "copilot_cookies": "copilot",
+                "cursor_cookies":  "cursor",
+            }
+            for cfg_key, prov_id in _key_map.items():
+                if cfg.get(cfg_key):
+                    active.append(prov_id)
+            # Fallback: always show at least Claude
+            return active or ["claude"]
+
+        def _bar_providers(cfg: dict) -> list[str] | None:
+            """User's explicit bar provider choices (lowercase IDs), or None for auto."""
+            chosen = cfg.get("bar_providers")
+            if not chosen:
+                return None
+            return [n.lower() for n in chosen]
+
+        def _copilot_block(provs: list[ProviderData]) -> dict:
+            pd = next((p for p in provs if p.name == "Copilot"), None)
+            if not pd:
+                return {"spent": None, "limit": None, "pct": None, "error": None}
+            if pd.error:
+                return {"spent": None, "limit": None, "pct": None, "error": pd.error}
+            pct = int(round(pd.spent / pd.limit * 100)) if pd.limit else 0
+            return {
+                "spent": pd.spent,
+                "limit": pd.limit,
+                "pct": pct,
+                "error": None,
+            }
 
         # ChatGPT rows
         chatgpt_pd = next((p for p in providers if p.name == "ChatGPT"), None)
@@ -785,10 +875,13 @@ def _write_widget_cache(
                 "rows": cursor_rows,
                 "error": cursor_error,
             },
+            "copilot": _copilot_block(providers),
             "claude_code": {
                 "today_messages": (cc_stats or {}).get("today_messages", 0),
                 "week_messages": (cc_stats or {}).get("week_messages", 0),
             },
+            "active_providers": _active_providers(config or {}),
+            "bar_providers": _bar_providers(config or {}),
         }
 
         os.makedirs(WIDGET_CACHE_DIR, exist_ok=True)
@@ -1064,16 +1157,18 @@ def _provider_lines(pd: ProviderData) -> list[str]:
 
 
 def _mi(title: str) -> rumps.MenuItem:
-    """Disabled (display-only) menu item."""
+    """Display-only menu item (non-clickable but visually active)."""
     item = rumps.MenuItem(title)
     item.set_callback(None)
+    item._menuitem.setEnabled_(True)
     return item
 
 
 def _colored_mi(title: str, color_hex: str) -> rumps.MenuItem:
-    """Disabled menu item with brand-colored text."""
+    """Display-only menu item with brand-colored text."""
     item = rumps.MenuItem(title)
     item.set_callback(None)
+    item._menuitem.setEnabled_(True)
     try:
         from AppKit import NSColor, NSForegroundColorAttributeName
         from Foundation import NSAttributedString
@@ -1116,9 +1211,10 @@ def _menu_icon(filename: str, tint_hex: str | None = None, size: int = 16):
 
 def _section_header_mi(title: str, icon_filename: str | None,
                         color_hex: str, icon_tint: str | None = None) -> rumps.MenuItem:
-    """Disabled section header with brand icon and colored bold title."""
+    """Section header with brand icon and colored bold title."""
     item = rumps.MenuItem(title)
     item.set_callback(None)
+    item._menuitem.setEnabled_(True)
     try:
         from AppKit import (NSColor, NSFont,
                             NSForegroundColorAttributeName, NSFontAttributeName)
@@ -1549,6 +1645,32 @@ class ClaudeBar(rumps.App):
         items.append(rumps.MenuItem("⭐ Star on GitHub", callback=self._open_github))
         items.append(None)
 
+        # Status bar display submenu
+        bar_menu = rumps.MenuItem("Status Bar")
+        chosen = self.config.get("bar_providers") or []
+        # In auto mode, compute which providers would be shown
+        if not chosen:
+            available_names = {"Claude"} if self._last_data else set()
+            for pd in self._provider_data:
+                if self._provider_bar_pct(pd) is not None:
+                    available_names.add(pd.name)
+            auto_shown = [n for n in self._BAR_PRIORITY if n in available_names][:2]
+        else:
+            auto_shown = []
+        self._bar_toggle_views = {}
+        for name in self._BAR_PRIORITY:
+            is_on = name in chosen if chosen else name in auto_shown
+            item = self._make_sticky_toggle(name, is_on, name)
+            bar_menu.add(item)
+        bar_menu.add(None)
+        is_auto = not chosen
+        auto_item = rumps.MenuItem(
+            "✓ Auto (top 2 active)" if is_auto else "Reset to Auto",
+            callback=self._bar_reset_auto,
+        )
+        bar_menu.add(auto_item)
+        items.append(bar_menu)
+
         # Refresh interval submenu
         interval_menu = rumps.MenuItem("Refresh Interval")
         for label, secs in REFRESH_INTERVALS.items():
@@ -1619,6 +1741,13 @@ class ClaudeBar(rumps.App):
 
         self.menu.clear()
         self.menu = items
+        # Prevent macOS from auto-disabling display-only items
+        try:
+            ns_menu = self._nsapp.nsstatusitem.menu()
+            if ns_menu:
+                ns_menu.setAutoenablesItems_(False)
+        except Exception:
+            pass
 
     # ── thread-safe UI helpers ────────────────────────────────────────────────
 
@@ -1793,7 +1922,7 @@ class ClaudeBar(rumps.App):
             self._check_pacing_alerts()
 
             self._post_data(data)          # ← main thread applies title + menu
-            _write_widget_cache(data, self._provider_data, self._cc_stats)
+            _write_widget_cache(data, self._provider_data, self._cc_stats, self.config)
         except CurlHTTPError as e:
             resp = getattr(e, "response", None)
             code = getattr(resp, "status_code", 0) or 0
@@ -1951,12 +2080,20 @@ class ClaudeBar(rumps.App):
                 # Pace slowed down — allow re-alerting if it picks up again
                 self._pacing_alerted.discard(hkey)
 
-    def _set_bar_title(self, pct: int, extra: str = "",
-                       chatgpt_pct: int | None = None,
+    # Bar icon/color config per provider name
+    _BAR_PROVIDERS = {
+        "Claude":  {"icon": "claude_icon.png",        "tint": None,      "color": "#D97757", "sym": "●"},
+        "ChatGPT": {"icon": "chatgpt_icon_clean.png", "tint": "#74AA9C", "color": "#74AA9C", "sym": "◇"},
+        "Cursor":  {"icon": "cursor.png",             "tint": "#6699FF", "color": "#6699FF", "sym": "◈"},
+        "Copilot": {"icon": "copilot.png",            "tint": "#8CBFF3", "color": "#8CBFF3", "sym": "◆"},
+    }
+
+    def _set_bar_title(self, provider_segments: list[tuple[str, int, str]],
                        cc_msgs: int | None = None):
         """Multi-indicator attributed title with brand logo icons.
 
-        [Claude icon] 36%  [ChatGPT icon] 0%  ◆ 3.2k
+        provider_segments: list of (provider_name, pct, extra_suffix)
+          e.g. [("Claude", 36, " ·"), ("ChatGPT", 12, "")]
 
         Falls back to colored text symbols if AppKit / icons unavailable.
         """
@@ -1971,48 +2108,43 @@ class ClaudeBar(rumps.App):
                 b = int(hex_str[5:7], 16) / 255
                 return NSColor.colorWithSRGBRed_green_blue_alpha_(r, g, b, 1.0)
 
-            CLAUDE_COLOR  = _rgb("#D97757")
-            CHATGPT_COLOR = _rgb("#74AA9C")
-
             font = NSFont.menuBarFontOfSize_(0)
             base = {NSFontAttributeName: font} if font else {}
 
             s = NSMutableAttributedString.alloc().initWithString_("",)
 
-            # ── Claude.ai  [icon] 36% ───────────────────────
-            claude_img = _bar_icon("claude_icon.png")
-            if claude_img:
-                s.appendAttributedString_(_icon_astr(claude_img, base))
-            else:
-                seg = NSMutableAttributedString.alloc().initWithString_attributes_("● ", base)
-                seg.addAttribute_value_range_(NSForegroundColorAttributeName, CLAUDE_COLOR, (0, 2))
-                s.appendAttributedString_(seg)
-            s.appendAttributedString_(
-                NSAttributedString.alloc().initWithString_attributes_(f" {pct}%{extra}", base)
-            )
+            for i, (name, pct, suffix) in enumerate(provider_segments):
+                cfg = self._BAR_PROVIDERS.get(name, {})
+                color_hex = cfg.get("color", "#AAAAAA")
+                color = _rgb(color_hex)
 
-            # ── ChatGPT  [icon] 0% ──────────────────────────
-            if chatgpt_pct is not None:
-                s.appendAttributedString_(
-                    NSAttributedString.alloc().initWithString_attributes_("   ", base)
-                )
-                chatgpt_img = _bar_icon("chatgpt_icon_clean.png", tint_hex="#74AA9C")
-                if chatgpt_img:
-                    s.appendAttributedString_(_icon_astr(chatgpt_img, base))
+                if i > 0:
+                    s.appendAttributedString_(
+                        NSAttributedString.alloc().initWithString_attributes_("   ", base)
+                    )
+
+                icon_file = cfg.get("icon")
+                tint = cfg.get("tint")
+                img = _bar_icon(icon_file, tint_hex=tint) if icon_file else None
+                if img:
+                    s.appendAttributedString_(_icon_astr(img, base))
                 else:
-                    seg = NSMutableAttributedString.alloc().initWithString_attributes_("◇ ", base)
-                    seg.addAttribute_value_range_(NSForegroundColorAttributeName, CHATGPT_COLOR, (0, 2))
+                    sym = cfg.get("sym", "●")
+                    seg = NSMutableAttributedString.alloc().initWithString_attributes_(f"{sym} ", base)
+                    seg.addAttribute_value_range_(NSForegroundColorAttributeName, color, (0, len(sym)))
                     s.appendAttributedString_(seg)
+
                 s.appendAttributedString_(
-                    NSAttributedString.alloc().initWithString_attributes_(f" {chatgpt_pct}%", base)
+                    NSAttributedString.alloc().initWithString_attributes_(f" {pct}%{suffix}", base)
                 )
 
             # ── Claude Code  ◆ 3.2k ────────────────────────
             if cc_msgs is not None and cc_msgs > 0:
+                cc_color = _rgb("#D97757")
                 seg = NSMutableAttributedString.alloc().initWithString_attributes_(
                     f"   ◆ {_fmt_count(cc_msgs)}", base
                 )
-                seg.addAttribute_value_range_(NSForegroundColorAttributeName, CLAUDE_COLOR, (3, 2))
+                seg.addAttribute_value_range_(NSForegroundColorAttributeName, cc_color, (3, 2))
                 s.appendAttributedString_(seg)
 
             self._nsapp.nsstatusitem.setAttributedTitle_(s)
@@ -2020,12 +2152,28 @@ class ClaudeBar(rumps.App):
         except Exception as e:
             log.debug("_set_bar_title failed: %s", e)
         # Plain-text fallback
-        parts = [f"{_status_icon(pct)} {pct}%{extra}"]
-        if chatgpt_pct is not None:
-            parts.append(f"◇ {chatgpt_pct}%")
+        parts = []
+        for name, pct, suffix in provider_segments:
+            cfg = self._BAR_PROVIDERS.get(name, {})
+            sym = cfg.get("sym", "●")
+            parts.append(f"{sym} {pct}%{suffix}")
         if cc_msgs is not None and cc_msgs > 0:
             parts.append(f"◆ {_fmt_count(cc_msgs)}")
         self.title = "  ".join(parts)
+
+    def _provider_bar_pct(self, pd: ProviderData) -> int | None:
+        """Extract a single percentage for the menu bar from a provider."""
+        if pd.error:
+            return None
+        rows = getattr(pd, "_rows", None)
+        if rows:
+            return max(r.pct for r in rows)
+        if pd.pct is not None:
+            return pd.pct
+        return None
+
+    # Priority order for the 2 bar slots (highest first)
+    _BAR_PRIORITY = ["Claude", "ChatGPT", "Cursor", "Copilot"]
 
     def _apply(self, data: UsageData):
         primary = data.session or data.weekly_all or data.weekly_sonnet
@@ -2037,23 +2185,28 @@ class ClaudeBar(rumps.App):
             extra = " ·" if (weekly_maxed and primary is data.session
                              and primary.pct < CRIT_THRESHOLD) else ""
 
-            # ChatGPT Codex % for the bar (worst-case across all windows)
-            chatgpt_pd = next(
-                (pd for pd in self._provider_data if pd.name == "ChatGPT"), None
-            )
-            chatgpt_pct: int | None = None
-            if chatgpt_pd and not chatgpt_pd.error:
-                rows = getattr(chatgpt_pd, "_rows", None)
-                if rows:
-                    chatgpt_pct = max(r.pct for r in rows)
+            # Collect all available segments
+            available: dict[str, tuple[str, int, str]] = {}
+            available["Claude"] = ("Claude", primary.pct, extra)
+            for pd in self._provider_data:
+                bar_pct = self._provider_bar_pct(pd)
+                if bar_pct is not None:
+                    available[pd.name] = (pd.name, bar_pct, "")
+
+            # User-configured bar providers, or auto top 2 by priority
+            chosen = self.config.get("bar_providers")
+            if chosen:
+                segments = [available[n] for n in chosen if n in available]
+            else:
+                segments = [available[n] for n in self._BAR_PRIORITY
+                            if n in available][:2]
 
             # Claude Code weekly messages
             cc_msgs: int | None = None
             if self._cc_stats:
                 cc_msgs = self._cc_stats.get("week_messages")
 
-            self._set_bar_title(primary.pct, extra,
-                                chatgpt_pct=chatgpt_pct, cc_msgs=cc_msgs)
+            self._set_bar_title(segments, cc_msgs=cc_msgs)
         else:
             self.title = "◆"
         self._rebuild_menu(data)
@@ -2168,6 +2321,131 @@ class ClaudeBar(rumps.App):
             self._timer.start()
             self._rebuild_menu(self._last_data)
         return _cb
+
+    _TOGGLE_ICONS = {
+        "Claude":  ("claude_icon.png",        None),
+        "ChatGPT": ("chatgpt_icon_clean.png", "#74AA9C"),
+        "Cursor":  ("cursor.png",             "#6699FF"),
+        "Copilot": ("copilot.png",            "#8CBFF3"),
+    }
+
+    def _make_sticky_toggle(self, display_name: str, is_on: bool, name: str):
+        """Create a menu item that stays open on click (custom NSView) with a real icon."""
+        item = rumps.MenuItem("")
+
+        if _HAS_TOGGLE_VIEW:
+            from AppKit import NSImageView
+
+            view_w, view_h = 220, 22
+            check_w = 22          # space for checkmark
+            icon_sz = 16
+            icon_pad = 4
+            label_x = check_w + icon_sz + icon_pad + 4
+
+            view = _BarToggleView.alloc().initWithFrame_(NSMakeRect(0, 0, view_w, view_h))
+
+            # Checkmark label
+            check = NSTextField.labelWithString_("✓" if is_on else "")
+            check.setFont_(NSFont.menuFontOfSize_(14))
+            check.setFrame_(NSMakeRect(6, 1, check_w - 4, view_h - 2))
+            check.setBezeled_(False)
+            check.setDrawsBackground_(False)
+            check.setEditable_(False)
+            check.setSelectable_(False)
+            view.addSubview_(check)
+
+            # Real icon
+            icon_file, icon_tint = self._TOGGLE_ICONS.get(name, (None, None))
+            if icon_file:
+                img = _menu_icon(icon_file, tint_hex=icon_tint, size=icon_sz)
+                if img:
+                    iv = NSImageView.alloc().initWithFrame_(
+                        NSMakeRect(check_w, (view_h - icon_sz) / 2, icon_sz, icon_sz)
+                    )
+                    iv.setImage_(img)
+                    view.addSubview_(iv)
+
+            # Provider name label
+            label = NSTextField.labelWithString_(display_name)
+            label.setFont_(NSFont.menuFontOfSize_(14))
+            label.setFrame_(NSMakeRect(label_x, 1, view_w - label_x - 4, view_h - 2))
+            label.setBezeled_(False)
+            label.setDrawsBackground_(False)
+            label.setEditable_(False)
+            label.setSelectable_(False)
+            view.addSubview_(label)
+
+            view._label = label
+            view._check = check
+            self._bar_toggle_views[name] = (view, label, check)
+
+            def _make_action(n):
+                def _action():
+                    self._do_bar_toggle(n)
+                return _action
+
+            view._action = _make_action(name)
+            item._menuitem.setView_(view)
+        else:
+            # Fallback: standard menu item (will close on click)
+            item = rumps.MenuItem(display_name, callback=lambda _: self._do_bar_toggle(name))
+            item._menuitem.setState_(1 if is_on else 0)
+            icon_file, icon_tint = self._TOGGLE_ICONS.get(name, (None, None))
+            if icon_file:
+                img = _menu_icon(icon_file, tint_hex=icon_tint, size=16)
+                if img:
+                    item._menuitem.setImage_(img)
+
+        return item
+
+    def _do_bar_toggle(self, name: str):
+        """Toggle a provider in the status bar and update views in-place."""
+        chosen = self.config.get("bar_providers")
+        if not chosen:
+            # Switching from auto → manual: seed with current auto selection
+            available_names = {"Claude"} if self._last_data else set()
+            for pd in self._provider_data:
+                if self._provider_bar_pct(pd) is not None:
+                    available_names.add(pd.name)
+            chosen = [n for n in self._BAR_PRIORITY if n in available_names][:2]
+        if name in chosen:
+            chosen.remove(name)
+        else:
+            chosen.append(name)
+        # If empty after removal, go back to auto
+        if not chosen:
+            self.config.pop("bar_providers", None)
+        else:
+            self.config["bar_providers"] = chosen
+        save_config(self.config)
+
+        # Update all toggle views in-place (no menu rebuild needed)
+        effective = self.config.get("bar_providers")
+        if not effective:
+            available_names = {"Claude"} if self._last_data else set()
+            for pd in self._provider_data:
+                if self._provider_bar_pct(pd) is not None:
+                    available_names.add(pd.name)
+            auto_shown = set(
+                [n for n in self._BAR_PRIORITY if n in available_names][:2]
+            )
+        else:
+            auto_shown = None
+
+        for n, (view, label, check) in self._bar_toggle_views.items():
+            is_on = n in effective if effective else n in auto_shown
+            check.setStringValue_("✓" if is_on else "")
+
+        if self._last_data:
+            self._apply(self._last_data)
+
+    def _bar_reset_auto(self, _sender):
+        """Reset bar display to auto-detect (top 2 active providers)."""
+        self.config.pop("bar_providers", None)
+        save_config(self.config)
+        self._rebuild_menu(self._last_data)
+        if self._last_data:
+            self._apply(self._last_data)
 
     def _set_cookie(self, _sender):
         key = _ask_text(

@@ -6,12 +6,36 @@ struct UsageSnapshot: Codable {
     let claude: ClaudeUsage
     let chatgpt: ChatGPTUsage
     let claudeCode: ClaudeCodeUsage
+    let cursor: CursorUsage?
+    let copilot: CopilotUsage?
+    let activeProviders: [String]?
+    let barProviders: [String]?
 
     enum CodingKeys: String, CodingKey {
         case version
         case updatedAt = "updated_at"
-        case claude, chatgpt
+        case claude, chatgpt, cursor, copilot
         case claudeCode = "claude_code"
+        case activeProviders = "active_providers"
+        case barProviders = "bar_providers"
+    }
+
+    /// Providers to display, respecting user's bar config or auto-detecting top 2.
+    var detectedProviders: [AIProvider] {
+        // 1. User's explicit bar choice (set via Status Bar menu in the app)
+        if let bar = barProviders, !bar.isEmpty {
+            let parsed = bar.compactMap { AIProvider(rawValue: $0) }
+            if !parsed.isEmpty { return parsed }
+        }
+        // 2. Auto: top 2 active by priority
+        let priority: [AIProvider] = [.claude, .chatgpt, .cursor, .copilot]
+        guard let ids = activeProviders, !ids.isEmpty else {
+            return [.claude, .chatgpt]
+        }
+        let active = Set(ids.compactMap { AIProvider(rawValue: $0) })
+        let picked = priority.filter { active.contains($0) }
+        let result = Array(picked.prefix(2))
+        return result.isEmpty ? [.claude, .chatgpt] : result
     }
 }
 
@@ -31,6 +55,18 @@ struct ClaudeUsage: Codable {
 
 struct ChatGPTUsage: Codable {
     let rows: [LimitRow]?
+    let error: String?
+}
+
+struct CursorUsage: Codable {
+    let rows: [LimitRow]?
+    let error: String?
+}
+
+struct CopilotUsage: Codable {
+    let spent: Double?
+    let limit: Double?
+    let pct: Int?
     let error: String?
 }
 

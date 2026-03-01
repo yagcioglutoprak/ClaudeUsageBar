@@ -4,10 +4,6 @@ import WidgetKit
 struct MediumWidgetView: View {
     let entry: QuotaEntry
 
-    // Brand colors
-    private let claudeColor = Color(red: 0.85, green: 0.55, blue: 0.35)   // warm terracotta
-    private let chatgptColor = Color(red: 0.45, green: 0.78, blue: 0.65)  // mint green
-
     var body: some View {
         if let snap = entry.snapshot {
             contentView(snap)
@@ -19,75 +15,74 @@ struct MediumWidgetView: View {
     }
 
     private func contentView(_ snap: UsageSnapshot) -> some View {
-        HStack(spacing: 0) {
-            // ── Claude ──
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image("claude_icon")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 22, height: 22)
-                    Text("Claude")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(claudeColor)
-                }
+        let providers = entry.providers
+        let maxRows = providers.count > 2 ? 2 : 3
 
-                if let session = snap.claude.session {
-                    limitRow(session, accent: claudeColor)
+        return HStack(spacing: 0) {
+            ForEach(Array(providers.enumerated()), id: \.offset) { idx, provider in
+                if idx > 0 {
+                    Rectangle()
+                        .fill(.quaternary)
+                        .frame(width: 1)
+                        .padding(.vertical, 2)
                 }
-                if let weekly = snap.claude.weeklyAll {
-                    limitRow(weekly, accent: claudeColor)
-                }
+                providerColumn(snap: snap, provider: provider, maxRows: maxRows)
+                    .padding(.leading, idx > 0 ? 10 : 0)
+                    .padding(.trailing, idx < providers.count - 1 ? 10 : 0)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
 
-                if snap.claudeCode.todayMessages > 0 {
+    private func providerColumn(snap: UsageSnapshot, provider: AIProvider, maxRows: Int) -> some View {
+        let data = provider.displayData(from: snap)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                providerIcon(provider, size: 22)
+                Text(provider.displayName)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(provider.color)
+            }
+
+            if let error = data.error {
+                Text(error)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            } else if data.isConfigured {
+                ForEach(data.rows.prefix(maxRows), id: \.label) { row in
+                    limitRow(row, accent: provider.color)
+                }
+                if let extra = data.extraInfo {
                     HStack(spacing: 3) {
                         Image(systemName: "terminal")
                             .font(.system(size: 8))
-                        Text("\(snap.claudeCode.todayMessages) msgs today")
+                        Text(extra)
                             .font(.system(size: 10))
                     }
-                    .foregroundStyle(claudeColor.opacity(0.7))
+                    .foregroundStyle(provider.color.opacity(0.7))
                 }
+            } else {
+                Text("Not set up")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
-            .padding(.trailing, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
 
-            // Divider
-            Rectangle()
-                .fill(.quaternary)
-                .frame(width: 1)
-                .padding(.vertical, 2)
-
-            // ── ChatGPT ──
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 6) {
-                    Image("chatgpt_icon")
-                        .renderingMode(.template)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 22, height: 22)
-                        .foregroundStyle(chatgptColor)
-                    Text("ChatGPT")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(chatgptColor)
-                }
-
-                if let error = snap.chatgpt.error {
-                    Text(error)
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                } else if let rows = snap.chatgpt.rows {
-                    ForEach(rows.prefix(3), id: \.label) { row in
-                        limitRow(row, accent: chatgptColor)
-                    }
-                } else {
-                    Text("Not set up")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.leading, 12)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    @ViewBuilder
+    private func providerIcon(_ provider: AIProvider, size: CGFloat) -> some View {
+        if provider.iconNeedsTemplate {
+            Image(provider.iconName)
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+                .foregroundStyle(provider.color)
+        } else {
+            Image(provider.iconName)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
         }
     }
 

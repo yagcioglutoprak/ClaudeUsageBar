@@ -12,6 +12,7 @@
 		34E4867EA7AF563BAAFDB8DC /* AIQuotaBarWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B05C7BB3FDD482BBF751DE38 /* AIQuotaBarWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		3E5BC5FC11FED0BF7C083040 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A180F3D85DF3DDF354631701 /* ContentView.swift */; };
 		40411D4C7B4DFF7F0E313CE6 /* AIQuotaBarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570E2F62E4831A94B233E682 /* AIQuotaBarWidget.swift */; };
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* AIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E1D0C9B8A7F6E5D4C3B2A1 /* AIProvider.swift */; };
 		4D2879E9ACD2648516FCBBCA /* Provider.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADB44E145A5A9597D0D8C74A /* Provider.swift */; };
 		5171961AC3ED322879B68E6A /* UsageData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BD62FB7F897B2FB4DAE238B /* UsageData.swift */; };
 		5D8DE51DCC7153CE5A87C1D2 /* SmallWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 650212297B09AFAD5A495C9D /* SmallWidgetView.swift */; };
@@ -48,6 +49,7 @@
 
 /* Begin PBXFileReference section */
 		0A4C07E8F11E4733411143EE /* WidgetEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetEntry.swift; sourceTree = "<group>"; };
+		F2E1D0C9B8A7F6E5D4C3B2A1 /* AIProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProvider.swift; sourceTree = "<group>"; };
 		1C5785927068F27A3AF5BDB6 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = WidgetKit.framework; sourceTree = "<group>"; };
 		27E8A75B7B36DD1794C75F13 /* AIQuotaBarHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AIQuotaBarHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		570E2F62E4831A94B233E682 /* AIQuotaBarWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIQuotaBarWidget.swift; sourceTree = "<group>"; };
@@ -98,6 +100,7 @@
 		43D4D563E976BA524373B25A /* AIQuotaBarWidgetExtension */ = {
 			isa = PBXGroup;
 			children = (
+				F2E1D0C9B8A7F6E5D4C3B2A1 /* AIProvider.swift */,
 				570E2F62E4831A94B233E682 /* AIQuotaBarWidget.swift */,
 				AB450644C74BC4071CC1F103 /* Assets.xcassets */,
 				6E0DC68ABF21C1C2F24EA998 /* MediumWidgetView.swift */,
@@ -240,6 +243,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* AIProvider.swift in Sources */,
 				40411D4C7B4DFF7F0E313CE6 /* AIQuotaBarWidget.swift in Sources */,
 				B59571F7FA917B6764601EA3 /* MediumWidgetView.swift in Sources */,
 				4D2879E9ACD2648516FCBBCA /* Provider.swift in Sources */,

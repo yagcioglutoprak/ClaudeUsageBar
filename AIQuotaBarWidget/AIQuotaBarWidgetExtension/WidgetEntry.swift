@@ -4,6 +4,7 @@ struct QuotaEntry: TimelineEntry {
     let date: Date
     let snapshot: UsageSnapshot?
     let isStale: Bool
+    let providers: [AIProvider]
 
     static let placeholder = QuotaEntry(
         date: .now,
@@ -20,10 +21,20 @@ struct QuotaEntry: TimelineEntry {
                 rows: [LimitRow(label: "Codex Tasks", pct: 12, resetStr: "resets Thu 05:38")],
                 error: nil
             ),
-            claudeCode: ClaudeCodeUsage(todayMessages: 42, weekMessages: 312)
+            claudeCode: ClaudeCodeUsage(todayMessages: 42, weekMessages: 312),
+            cursor: nil,
+            copilot: nil,
+            activeProviders: ["claude", "chatgpt"],
+            barProviders: nil
         ),
-        isStale: false
+        isStale: false,
+        providers: [.claude, .chatgpt]
     )
 
-    static let empty = QuotaEntry(date: .now, snapshot: nil, isStale: false)
+    static let empty = QuotaEntry(
+        date: .now,
+        snapshot: nil,
+        isStale: false,
+        providers: [.claude, .chatgpt]
+    )
 }

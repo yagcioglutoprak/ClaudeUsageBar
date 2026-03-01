@@ -19,11 +19,11 @@ struct AIQuotaBarWidget: Widget {
     let kind = "AIQuotaBarWidget"
 
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: QuotaProvider()) { entry in
+        AppIntentConfiguration(kind: kind, intent: SelectProvidersIntent.self, provider: QuotaProvider()) { entry in
             AIQuotaBarWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("AI Quota")
-        .description("Monitor Claude and ChatGPT usage limits.")
+        .description("Monitor your AI usage limits.")
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }
