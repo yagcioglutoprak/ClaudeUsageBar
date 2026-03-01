@@ -1472,7 +1472,7 @@ class ClaudeBar(rumps.App):
             (pd for pd in self._provider_data if pd.name == "Copilot"), None
         )
         if copilot_pd:
-            items.append(_section_header_mi("  GitHub Copilot", None, "#6E40C9"))
+            items.append(_section_header_mi("  GitHub Copilot", "copilot.png", "#6E40C9", icon_tint="#9B6BFF"))
             for line in _provider_lines(copilot_pd):
                 if line:
                     items.append(_mi(line))
@@ -1487,7 +1487,7 @@ class ClaudeBar(rumps.App):
             (pd for pd in self._provider_data if pd.name == "Cursor"), None
         )
         if cursor_pd:
-            items.append(_section_header_mi("  Cursor", None, "#00A0D1"))
+            items.append(_section_header_mi("  Cursor", "cursor.png", "#00A0D1", icon_tint="#00A0D1"))
             rows = getattr(cursor_pd, "_rows", None)
             if rows:
                 for row in rows:

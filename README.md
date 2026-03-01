@@ -1,6 +1,6 @@
 # AIQuotaBar
 
-**Stop getting rate-limited by surprise.** See your Claude and ChatGPT usage live in the macOS menu bar.
+**Stop getting rate-limited by surprise.** See your Claude, ChatGPT, Cursor, and Copilot usage live in the macOS menu bar.
 
 No Electron. No browser extension. One command to install.
 
@@ -34,13 +34,13 @@ brew install --HEAD aiquotabar
 aiquotabar &
 ```
 
-The app launches immediately and auto-detects your Claude session from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
+The app launches immediately and auto-detects your Claude, ChatGPT, Cursor, and Copilot sessions from Chrome, Arc, Firefox, or Safari — no copy-pasting cookies.
 
 ---
 
 ### Why I built this
 
-I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall. Same with ChatGPT. So I built a tiny menu bar app that shows both.
+I kept getting cut off mid-session on Claude Pro with zero warning. Claude.ai doesn't show your usage until you hit the wall. Same with ChatGPT, Cursor, and Copilot. So I built a tiny menu bar app that shows them all.
 
 ---
 
@@ -76,16 +76,27 @@ CHATGPT
   █░░░░░░░░░░░░░  0%
   resets Thu 05:38
 
-  🟢 Code Review
+GITHUB COPILOT
+
+  0 / 300 this month
   █░░░░░░░░░░░░░  0%
-  resets Thu 05:38
+
+CURSOR
+
+  🟢 Auto
+  █░░░░░░░░░░░░░  0%
+  resets in 27d
+
+  🟢 API
+  █░░░░░░░░░░░░░  0%
+  resets in 27d
 ```
 
 ---
 
 ## Desktop Widget (NEW)
 
-Native macOS WidgetKit widget — see your Claude and ChatGPT usage right on your desktop or in Notification Center.
+Native macOS WidgetKit widget — see your AI usage right on your desktop or in Notification Center.
 
 **Small widget:** Claude + ChatGPT percentages at a glance, color-coded by brand.
 
@@ -106,11 +117,13 @@ cd AIQuotaBarWidget && ./build_widget.sh
 ## Features
 
 - **Zero-setup auth** — reads cookies directly from your browser (Chrome, Arc, Brave, Edge, Firefox, Safari)
-- **Claude + ChatGPT** — tracks both Claude.ai session/weekly limits and ChatGPT usage in one place
+- **Claude + ChatGPT + Cursor + Copilot** — tracks Claude.ai session/weekly limits, ChatGPT rate limits, Cursor Auto/API usage, and GitHub Copilot premium requests — all in one place
 - **Desktop widget** — native macOS WidgetKit widget with brand-colored progress bars
 - **Multi-provider** — add OpenAI, MiniMax, GLM (Zhipu) API keys to see spending alongside usage
+- **Burn rate + ETA** — predicts when you'll hit each limit based on your current pace
+- **Pacing alerts** — notifies you when you're on track to hit a limit within 30 minutes
 - **Auto-refresh on session expiry** — silently grabs fresh cookies when your session expires
-- **macOS notifications** — alerts at 80% and 95% usage
+- **macOS notifications** — alerts at 80% and 95% usage for Claude, ChatGPT, and Cursor
 - **Configurable refresh** — 1 / 5 / 15 min
 - **Runs at login** — via LaunchAgent, toggle from the menu
 - **Tiny footprint** — ~900 lines of Python, no Electron, no background services beyond the app itself
@@ -122,8 +135,8 @@ cd AIQuotaBarWidget && ./build_widget.sh
 | | AIQuotaBar | Open settings page | Browser extension |
 |---|---|---|---|
 | Always visible | ✅ Menu bar + desktop widget | ❌ Manual tab switch | ⚠️ Badge only |
-| Notifications | ✅ 80% + 95% | ❌ None | ⚠️ Varies |
-| Claude + ChatGPT | ✅ Both in one place | ❌ One at a time | ❌ |
+| Notifications | ✅ 80% + 95% + pacing alerts | ❌ None | ⚠️ Varies |
+| Claude + ChatGPT + Cursor + Copilot | ✅ All in one place | ❌ One at a time | ❌ |
 | Desktop widget | ✅ Native WidgetKit | ❌ | ❌ |
 | Privacy | ✅ Local only | ✅ | ⚠️ Depends on extension |
 | Install | ✅ One command | ✅ Nothing | ❌ Store + permissions |
@@ -185,6 +198,9 @@ The app will try to auto-detect fresh cookies from your browser. If that fails, 
 
 - [x] Homebrew tap (`brew tap yagcioglutoprak/aiquotabar && brew install --HEAD aiquotabar`)
 - [x] Native macOS desktop widget (WidgetKit)
+- [x] Cursor IDE usage tracking (Auto + API)
+- [x] GitHub Copilot premium request tracking
+- [x] Burn rate ETA + pacing alerts
 - [ ] Linux system tray support
 - [ ] Windows tray app
 - [ ] Customizable notification thresholds
